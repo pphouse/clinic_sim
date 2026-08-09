@@ -4,7 +4,14 @@
  * 同じ集計が複数画面に散ると必ずどこかがズレるので、
  * 「複数画面で使う数字」は例外なくこのファイルに置く。
  */
-import { CLINICS, REPUTATION_MAX, REPUTATION_MIN, TOLERABLE_WAIT_MINUTES } from './constants';
+import {
+  CLINICS,
+  MONTHS_PER_YEAR,
+  REPUTATION_MAX,
+  REPUTATION_MIN,
+  TOLERABLE_WAIT_MINUTES,
+} from './constants';
+import { SCHOOL_DURATION_MONTHS, SCHOOL_GRADUATES_PER_CLASS, enrolledClasses } from './staff';
 import { CRITICAL_WAIT_MINUTES } from './events';
 import type { ClinicId, ClinicTick, GameEvent, Man, Month, MonthResult, ScreenId } from './types';
 
@@ -271,5 +278,55 @@ export function groupSummary(result: MonthResult, previous: MonthResult | null):
     cash,
     cashDelta: previous ? cash - previous.financials.balanceSheet.cash : null,
     operatingIncome: deriveGroupTotals(result).operatingIncome,
+  };
+}
+
+// ---------------------------------------------------------------- 看護学校
+
+/**
+ * 学校の現在地。看護学校画面が読む。
+ *
+ * 開校月は GameState にしか無いが、UI に状態管理を持たせたくない。
+ * **学校運営費が立っている最初の月＝開校月**なので、履歴から引く。
+ */
+export interface SchoolStatus {
+  open: boolean;
+  openedAtMonth: Month | null;
+  /** 在学中の学年数（0〜3） */
+  enrolledClasses: number;
+  /** 次に卒業生が出る月 */
+  nextGraduationMonth: Month | null;
+  /** 1学年が卒業したときに自法人へ残る人数 */
+  graduatesPerClass: number;
+  /** 今月入職した卒業生 */
+  graduatedThisMonth: number;
+}
+
+export function schoolStatus(months: MonthResult[], upToMonth: Month): SchoolStatus {
+  const opened = months.find((m) => m.financials.incomeStatement.schoolOperating > 0);
+  const openedAtMonth = opened?.month ?? null;
+  const current = months[upToMonth - 1];
+  if (openedAtMonth === null || upToMonth < openedAtMonth || !current) {
+    return {
+      open: false,
+      openedAtMonth,
+      enrolledClasses: 0,
+      nextGraduationMonth: null,
+      graduatesPerClass: SCHOOL_GRADUATES_PER_CLASS,
+      graduatedThisMonth: 0,
+    };
+  }
+  const first = openedAtMonth + SCHOOL_DURATION_MONTHS;
+  const nextGraduationMonth =
+    upToMonth < first
+      ? first
+      : first + Math.ceil((upToMonth - first + 1) / MONTHS_PER_YEAR) * MONTHS_PER_YEAR;
+  return {
+    open: true,
+    openedAtMonth,
+    enrolledClasses: enrolledClasses(upToMonth, openedAtMonth),
+    nextGraduationMonth,
+    graduatesPerClass: SCHOOL_GRADUATES_PER_CLASS,
+    graduatedThisMonth: current.staff.nursesFromSchool,
   };
 }

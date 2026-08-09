@@ -15,16 +15,20 @@ import {
   runSimulation,
   type ClinicId,
   type MonthDecision,
+  type ScreenId,
 } from '@med/sim';
 import { ClinicScreen, type ClinicTabId } from './screens/clinic/ClinicScreen';
 import { MapScreen } from './screens/map/MapScreen';
+import { BuildingScreen } from './screens/buildings/BuildingScreens';
 
 export function App() {
   const [decisions, setDecisions] = useState<MonthDecision[]>(BASELINE_SCENARIO.decisions);
   const [month, setMonth] = useState(1);
   const [tab, setTab] = useState<ClinicTabId>('overview');
-  /** 開いている診療所。null ならマップ（根） */
+  /** 開いている診療所。null ならマップか建物 */
   const [openClinic, setOpenClinic] = useState<ClinicId | null>(null);
+  /** 開いている建物。null なら診療所かマップ */
+  const [openBuilding, setOpenBuilding] = useState<ScreenId | null>(null);
 
   const run = useMemo(
     () => runSimulation({ ...BASELINE_SCENARIO, decisions }),
@@ -58,12 +62,25 @@ export function App() {
     });
   }
 
+  if (openBuilding !== null) {
+    return (
+      <BuildingScreen
+        screen={openBuilding}
+        result={result}
+        previous={previous}
+        history={run.months}
+        onClose={() => setOpenBuilding(null)}
+      />
+    );
+  }
+
   if (openClinic === null) {
     return (
       <MapScreen
         result={result}
         previous={previous}
         onOpenClinic={setOpenClinic}
+        onOpenBuilding={setOpenBuilding}
         onMonthChange={changeMonth}
         canGoBack={month > 1}
         canGoForward={month < run.months.length}

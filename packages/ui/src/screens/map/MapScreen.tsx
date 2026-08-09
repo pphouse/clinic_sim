@@ -16,6 +16,7 @@ import {
   type ClinicId,
   type ClinicSummary,
   type MonthResult,
+  type ScreenId,
 } from '@med/sim';
 import { IconButton } from '../../components/IconButton';
 import { StarRating } from '../../components/StarRating';
@@ -27,6 +28,7 @@ import {
 } from '../../components/icons';
 import { compactMan, formatSignedMan, minutes, people } from '../../format';
 import mapDistrict from '../../assets/map-district.svg';
+import { BUILDINGS } from '../registry';
 
 /**
  * 地図上の位置。**sim は座標を持たない**（docs/spec/screens/map.md）。
@@ -48,6 +50,7 @@ export interface MapScreenProps {
   result: MonthResult;
   previous: MonthResult | null;
   onOpenClinic: (id: ClinicId) => void;
+  onOpenBuilding: (id: ScreenId) => void;
   onMonthChange: (delta: number) => void;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -139,6 +142,55 @@ export function MapScreen(props: MapScreenProps) {
               onOpen={() => props.onOpenClinic(clinic.id)}
             />
           ))}
+
+          {/*
+            訪問先。**ここに出ている建物だけが実装済み。**
+            仕様の無い画面へは行けないので、行けない先を並べない（§7）
+          */}
+          <h2
+            style={{
+              margin: 'var(--space-6) 0 var(--space-3)',
+              fontFamily: 'var(--font-display)',
+              fontSize: 'var(--text-label)',
+              fontWeight: 600,
+              color: 'var(--paper-dim)',
+              letterSpacing: '0.08em',
+            }}
+          >
+            訪問先
+          </h2>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: 'var(--space-2)',
+            }}
+          >
+            {BUILDINGS.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => props.onOpenBuilding(b.id)}
+                data-testid={`building-${b.id}`}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 3,
+                  padding: 'var(--space-2) 2px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--ink-700)',
+                  background: 'var(--ink-800)',
+                  color: 'var(--paper)',
+                  cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                <img src={b.icon} alt="" width={34} height={34} style={{ display: 'block' }} />
+                <span style={{ fontSize: 'var(--text-caption)' }}>{b.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

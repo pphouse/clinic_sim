@@ -123,8 +123,43 @@ await shot('14-map-crisis');
 
 // --- 分院へ。B院は19ヶ月目に開院する
 await page.getByTestId('clinic-row-B').click();
-await beat(1600);
+await beat(1500);
 await shot('15-clinic-b');
+await page.getByLabel('閉じる').click();
+await beat(900);
+
+// --- 建物を一巡する。危機のあとの月で見るのが分かりやすいので34ヶ月目へ
+await goToMonth(34);
+await beat(1200);
+for (const [id, name] of [
+  ['hq', '16-hq'],
+  ['accounting', '17-accounting'],
+  ['personnel', '18-personnel'],
+  ['igyoku', '19-igyoku'],
+  ['agency', '20-agency'],
+  ['nursingSchool', '21-school'],
+  ['bank', '22-bank'],
+  ['bureau', '23-bureau'],
+]) {
+  await page.getByTestId(`building-${id}`).click();
+  await beat(1500);
+  await shot(name);
+  await page.getByLabel('閉じる').click();
+  await beat(700);
+}
+
+// --- 経理は3タブ。貸借と資金も見せる
+await page.getByTestId('building-accounting').click();
+await beat(900);
+await page.getByRole('button', { name: '貸借' }).click();
+await beat(1600);
+await shot('24-accounting-bs');
+await page.getByRole('button', { name: '資金' }).click();
+await beat(1600);
+await shot('25-accounting-cf');
+await page.getByLabel('閉じる').click();
+await beat(1200);
+await shot('26-map-final');
 
 await context.close();
 await browser.close();
