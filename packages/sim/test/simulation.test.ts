@@ -1,55 +1,38 @@
 /**
- * ゴールデンテスト（全社）。
+ * 月次モデルの回帰防止。
  *
- * golden.test.ts は「golden の入力を与えたら診療所 tick が一致するか」を見る。
- * こちらは **シム核が自分で 40 四半期を回した結果** が golden と一致するかを見る。
- * 人材・診療報酬・会計まで含めて、入力は BASELINE_SCENARIO の意思決定だけ。
- *
- * baseline.golden.json は小数2桁で丸められている。だから許容差は
- * 丸めの粒度そのもの（0.01）に置く。ここを緩めると実装のズレが隠れる。
+ * 検証データとの突き合わせは golden.test.ts の仕事。ここは
+ * **実装から固定した baseline.monthly.json との一致**を見る。
+ * こちらは検証の起点ではなく、意図しない変更を検出するためのロック。
  */
 import { describe, expect, it } from 'vitest';
-import golden from './golden/baseline.golden.json';
+import locked from './golden/baseline.monthly.json';
 import { assertBalanced } from '../src/accounting';
-import { addonLapseQuarters, deriveGroupTotals } from '../src/derive';
-import { FEE_REVISIONS, INITIAL_CASH } from '../src/constants';
-import { quarterMonthsLabel } from '../src/engine';
+import { addonLapseMonths, deriveGroupTotals } from '../src/derive';
+import { INITIAL_CASH, TOTAL_MONTHS } from '../src/constants';
 import { BASELINE_SCENARIO } from '../src/scenario';
 import { runSimulation } from '../src/simulation';
 
-const quarters = golden.quarters;
+const expected = locked.months;
 const run = runSimulation();
 const clinicIds = ['A', 'B', 'C'] as const;
 
-/** golden の丸め粒度 */
+/** baseline.monthly.json の丸め粒度 */
 const MONEY = 0.01;
-const RATE_4DP = 0.0001;
-const INDEX_3DP = 0.001;
+const RATE = 0.0001;
 
-function close(actual: number, expected: number, tolerance: number, label: string): void {
-  expect(Math.abs(actual - expected), `${label}: 実装 ${actual} / golden ${expected}`).toBeLessThanOrEqual(
+function close(actual: number, want: number, tolerance: number, label: string): void {
+  expect(Math.abs(actual - want), `${label}: 実装 ${actual} / ロック ${want}`).toBeLessThanOrEqual(
     tolerance,
   );
 }
 
-describe('40四半期が最後まで回る', () => {
-  it('意思決定だけを入力に、40四半期ぶんの結果が出る', () => {
-    expect(run.quarters).toHaveLength(BASELINE_SCENARIO.totalQuarters);
-    expect(run.quarters[0]!.label).toBe('Y1Q1');
-    expect(run.quarters[39]!.label).toBe('Y10Q4');
-  });
-
-  it('画面に出すラベルは月表記。年度は4月始まりで、改定は必ず4月に来る', () => {
-    expect(quarterMonthsLabel(1)).toBe('1年目 4〜6月');
-    expect(quarterMonthsLabel(7)).toBe('2年目 10〜12月');
-    expect(quarterMonthsLabel(40)).toBe('10年目 1〜3月');
-    // 既定シナリオの改定は全て年度の第1四半期＝4月に施行される
-    for (const revision of FEE_REVISIONS) {
-      expect(
-        quarterMonthsLabel(revision.effectiveQuarter),
-        `${revision.name} の施行月`,
-      ).toContain('4〜6月');
-    }
+describe('120ヶ月が最後まで回る', () => {
+  it('意思決定だけを入力に、10年ぶんの結果が出る', () => {
+    expect(run.months).toHaveLength(TOTAL_MONTHS);
+    expect(run.months).toHaveLength(BASELINE_SCENARIO.totalMonths);
+    expect(run.months[0]!.label).toBe('1年目 4月');
+    expect(run.months[119]!.label).toBe('10年目 3月');
   });
 
   it('同じシナリオを2回回すと完全に同じ結果になる（決定性）', () => {
@@ -57,164 +40,120 @@ describe('40四半期が最後まで回る', () => {
   });
 });
 
-describe('ゴールデン：人材', () => {
-  it('常勤医の配置が一致する', () => {
-    for (let i = 0; i < quarters.length; i++) {
-      const g = quarters[i]!;
-      const staff = run.quarters[i]!.staff;
+describe('ロックとの一致', () => {
+  it('人材が一致する', () => {
+    for (let i = 0; i < expected.length; i++) {
+      const want = expected[i]!;
+      const staff = run.months[i]!.staff;
       for (const id of clinicIds) {
-        expect(staff.doctorsByClinic[id], `Q${g.q} ${id}院の常勤医`).toBe(g.doctors[id]);
+        expect(staff.doctorsByClinic[id], `${want.m}ヶ月目 ${id}院の常勤医`).toBe(want.doctors[id]);
       }
+      close(staff.nurses, want.nurses, MONEY, `${want.m}ヶ月目 看護師`);
+      close(staff.nurseSufficiency, want.nurseSufficiency, RATE, `${want.m}ヶ月目 充足率`);
+      expect(staff.igyokuRelation, `${want.m}ヶ月目 医局関係値`).toBe(want.igyokuRelation);
     }
   });
 
-  it('看護師の在籍・必要数・充足率が一致する', () => {
-    for (let i = 0; i < quarters.length; i++) {
-      const g = quarters[i]!;
-      const staff = run.quarters[i]!.staff;
-      close(staff.nurses, g.nurses, MONEY, `Q${g.q} 看護師在籍`);
-      close(staff.nursesRequired, g.nursesRequired, MONEY, `Q${g.q} 必要看護師`);
-      close(staff.nurseSufficiency, g.nurseSufficiency, RATE_4DP, `Q${g.q} 看護師充足率`);
+  it('診療報酬が一致する', () => {
+    for (let i = 0; i < expected.length; i++) {
+      const want = expected[i]!;
+      const fee = run.months[i]!.fee;
+      close(fee.feePointIndex, want.feePointIndex, RATE, `${want.m}ヶ月目 点数指数`);
+      close(fee.addonTotal, want.addonTotal, RATE, `${want.m}ヶ月目 加算合計`);
+      close(fee.effectiveFeeIndex, want.effectiveFeeIndex, RATE, `${want.m}ヶ月目 実効点数指数`);
     }
   });
 
-  it('医局関係値が一致し、調達枠を割らない', () => {
-    for (let i = 0; i < quarters.length; i++) {
-      const g = quarters[i]!;
-      const staff = run.quarters[i]!.staff;
-      expect(staff.igyokuRelation, `Q${g.q} 医局関係値`).toBe(g.igyokuRelation);
-      expect(staff.doctorShortfall, `Q${g.q} 医師の調達枠`).toBe(false);
-    }
-  });
-
-  it('自校の卒業生は開校の3年後から、毎年まとまって入る', () => {
-    const graduationQuarters = run.quarters
-      .filter((q) => q.staff.nursesFromSchool > 0)
-      .map((q) => q.quarter);
-    // Q5 開校 → Q17 が最初の卒業。以降は毎年
-    expect(graduationQuarters).toEqual([17, 21, 25, 29, 33, 37]);
-    close(run.quarters[16]!.staff.nursesFromSchool, 11.9, 1e-9, '1学年の入職者');
-  });
-});
-
-describe('ゴールデン：診療報酬', () => {
-  it('改定の累積と加算の合計が一致する', () => {
-    for (let i = 0; i < quarters.length; i++) {
-      const g = quarters[i]!;
-      const fee = run.quarters[i]!.fee;
-      close(fee.feePointIndex, g.feePointIndex, INDEX_3DP, `Q${g.q} 点数指数`);
-      close(fee.addonTotal, g.addonTotal, 1e-9, `Q${g.q} 加算合計`);
-      close(fee.effectiveFeeIndex, g.effectiveFeeIndex, INDEX_3DP, `Q${g.q} 実効点数指数`);
-    }
-  });
-
-  it('要件割れによる加算の失効は通算8四半期（検証済み）', () => {
-    expect(addonLapseQuarters(run.quarters)).toEqual([5, 6, 7, 9, 10, 15, 31, 32]);
-  });
-
-  it('取得したが一度も要件を満たしていない加算は「失効」ではない', () => {
-    // 在宅療養支援加算は Q9 に取得したが、常勤医5名が揃う Q17 まで有効にならない
-    const zaitaku = (i: number) => run.quarters[i]!.fee.addons.find((a) => a.id === 'zaitaku')!;
-    expect(zaitaku(8).acquired).toBe(true);
-    expect(zaitaku(8).active).toBe(false);
-    expect(zaitaku(8).lapsedByRequirement).toBe(true);
-    expect(addonLapseQuarters(run.quarters)).not.toContain(11);
-    expect(zaitaku(16).active).toBe(true);
-  });
-
-  it('加算は5つ揃うと +19%。改定#3の -5% を打ち消す', () => {
-    const last = run.quarters[39]!.fee;
-    expect(last.addons.every((a) => a.acquired && a.active)).toBe(true);
-    close(last.addonTotal, 0.19, 1e-9, '加算の合計率');
-  });
-});
-
-describe('ゴールデン：診療所の40四半期（シム核が自走した結果）', () => {
   for (const id of clinicIds) {
-    it(`${id}院がエクセルと一致する`, () => {
-      for (let i = 0; i < quarters.length; i++) {
-        const g = quarters[i]!;
-        const expected = g.clinics[id];
-        const actual = run.quarters[i]!.clinics.find((c) => c.id === id)!;
-        close(actual.patientStock, expected.patientStock, MONEY, `${id}院 Q${g.q} 患者ストック`);
-        close(actual.waitMinutes, expected.waitMinutes, MONEY, `${id}院 Q${g.q} 待ち時間`);
-        close(actual.reputation, expected.reputation, MONEY, `${id}院 Q${g.q} 評判`);
-        close(actual.utilization, expected.utilization, RATE_4DP, `${id}院 Q${g.q} 稼働率`);
-        close(actual.insuranceRevenue, expected.insuranceRevenue, MONEY, `${id}院 Q${g.q} 保険収入`);
-        close(actual.selfPayRevenue, expected.selfPayRevenue, MONEY, `${id}院 Q${g.q} 自費収入`);
-        close(actual.operatingCost, expected.operatingCost, MONEY, `${id}院 Q${g.q} 営業費用`);
-        close(actual.operatingIncome, expected.operatingIncome, MONEY, `${id}院 Q${g.q} 営業利益`);
+    it(`${id}院の120ヶ月が一致する`, () => {
+      for (let i = 0; i < expected.length; i++) {
+        const want = expected[i]!.clinics[id];
+        const actual = run.months[i]!.clinics.find((c) => c.id === id)!;
+        const at = `${id}院 ${expected[i]!.m}ヶ月目`;
+        close(actual.patientStock, want.patientStock, MONEY, `${at} 患者ストック`);
+        close(actual.waitMinutes, want.waitMinutes, MONEY, `${at} 待ち時間`);
+        close(actual.reputation, want.reputation, MONEY, `${at} 評判`);
+        close(actual.utilization, want.utilization, RATE, `${at} 稼働率`);
+        close(actual.insuranceRevenue, want.insuranceRevenue, MONEY, `${at} 保険収入`);
+        close(actual.operatingIncome, want.operatingIncome, MONEY, `${at} 営業利益`);
       }
     });
   }
-});
 
-describe('ゴールデン：全社の資金繰り', () => {
-  it('収益・営業利益・本部費・投資・借入・金利・返済が一致する', () => {
-    for (let i = 0; i < quarters.length; i++) {
-      const g = quarters[i]!;
-      const t = deriveGroupTotals(run.quarters[i]!);
-      // golden の revenue は診療収入＋学費
-      close(t.clinicRevenue + t.tuitionRevenue, g.group.revenue, MONEY, `Q${g.q} 全社収益`);
-      close(t.operatingIncome, g.group.operatingIncome, MONEY, `Q${g.q} 全社営業利益`);
-      close(t.hqCost, g.group.hqCost, MONEY, `Q${g.q} 本部費`);
-      close(t.capex, g.group.capex, MONEY, `Q${g.q} 投資`);
-      close(t.newBorrowing, g.group.newBorrowing, MONEY, `Q${g.q} 新規借入`);
-      close(t.interest, g.group.interest, MONEY, `Q${g.q} 支払利息`);
-      close(t.principalRepaid, g.group.principalRepaid, MONEY, `Q${g.q} 元金返済`);
+  it('全社の資金繰りが一致する', () => {
+    let verificationCash = INITIAL_CASH;
+    for (let i = 0; i < expected.length; i++) {
+      const want = expected[i]!.group;
+      const t = deriveGroupTotals(run.months[i]!);
+      const at = `${expected[i]!.m}ヶ月目`;
+      close(t.clinicRevenue + t.tuitionRevenue, want.revenue, MONEY, `${at} 収益`);
+      close(t.operatingIncome, want.operatingIncome, MONEY, `${at} 営業利益`);
+      close(t.hqCost, want.hqCost, MONEY, `${at} 本部費`);
+      close(t.capex, want.capex, MONEY, `${at} 投資`);
+      close(t.interest, want.interest, MONEY, `${at} 支払利息`);
+      close(t.principalRepaid, want.principalRepaid, MONEY, `${at} 元金返済`);
+      // 検証モデル基準（未収金と税金を無視した見方）の現金
+      verificationCash +=
+        t.operatingIncome - t.hqCost + t.newBorrowing - t.capex - t.interest - t.principalRepaid;
+      close(verificationCash, want.verificationCash, MONEY, `${at} 現金（検証モデル基準）`);
     }
   });
 
-  it('検証モデル基準の現金残（未収金・税金を無視した見方）が一致する', () => {
-    // エクセルには B/S が無く、投資は即時の現金流出、未収金も法人税も無かった。
-    // その前提を再現すると golden の cash 列と一致する。
-    // 実装の B/S 現金はこれとは別物（未収金と税金のぶん少ない）。
-    let cash = INITIAL_CASH;
-    for (let i = 0; i < quarters.length; i++) {
-      const g = quarters[i]!;
-      const t = deriveGroupTotals(run.quarters[i]!);
-      cash += t.operatingIncome - t.hqCost + t.newBorrowing - t.capex - t.interest - t.principalRepaid;
-      close(cash, g.group.cash, MONEY, `Q${g.q} 現金（検証モデル基準）`);
-    }
-  });
-
-  it('借入残高の推移が一致する', () => {
-    for (let i = 1; i < quarters.length; i++) {
-      const g = quarters[i]!;
-      const previous = run.quarters[i - 1]!.financials.balanceSheet;
-      const opening = previous.shortTermDebt + previous.longTermDebt;
-      close(opening, g.group.debtOpening, MONEY, `Q${g.q} 期首借入残高`);
+  it('三表が一致する', () => {
+    for (let i = 0; i < expected.length; i++) {
+      const want = expected[i]!.balanceSheet;
+      const bs = run.months[i]!.financials.balanceSheet;
+      const at = `${expected[i]!.m}ヶ月目`;
+      close(bs.cash, want.cash, MONEY, `${at} 現金`);
+      close(bs.accountsReceivable, want.accountsReceivable, MONEY, `${at} 未収金`);
+      close(bs.fixedAssets, want.fixedAssets, MONEY, `${at} 固定資産`);
+      close(bs.totalEquity, want.totalEquity, MONEY, `${at} 純資産`);
     }
   });
 });
 
-describe('検証済みの設計上の性質（回帰防止）', () => {
-  const a = run.quarters.map((q) => q.clinics.find((c) => c.id === 'A')!);
-
-  it('待ち時間のピークはQ7、患者ストックの底はQ11。遅延は4四半期', () => {
-    const peakWaitQ = a.reduce((best, c, i) => (c.waitMinutes > a[best]!.waitMinutes ? i : best), 0) + 1;
-    const window = a.slice(4, 20);
-    const troughQ =
-      window.reduce((best, c, i) => (c.patientStock < window[best]!.patientStock ? i : best), 0) + 5;
-    expect(peakWaitQ).toBe(7);
-    expect(troughQ).toBe(11);
-    expect(troughQ - peakWaitQ).toBe(4);
+describe('月刻みで見えるようになったもの', () => {
+  it('看護師は毎月 0.4 人しか採れない。四半期モデルの 1.2 人が3回に割れている', () => {
+    const hiring = run.months.filter((t) => t.staff.nursesFromMarket > 0);
+    expect(hiring.length).toBeGreaterThan(20);
+    expect(Math.max(...hiring.map((t) => t.staff.nursesFromMarket))).toBeCloseTo(0.4, 10);
   });
 
-  it('評判は4四半期で41台まで落ちる。壊すのは一瞬', () => {
-    expect(a[3]!.reputation).toBeCloseTo(75, 5);
-    const worst = Math.min(...a.map((c) => c.reputation));
-    expect(worst).toBeGreaterThan(41);
-    expect(worst).toBeLessThan(42);
+  it('自校の卒業生は年1回まとめて入る。開校の3年後から', () => {
+    const graduations = run.months
+      .filter((t) => t.staff.nursesFromSchool > 0)
+      .map((t) => t.month);
+    // 13ヶ月目に開校 → 49ヶ月目が最初の卒業。以降は毎年
+    expect(graduations).toEqual([49, 61, 73, 85, 97, 109]);
+    expect(run.months[48]!.staff.nursesFromSchool).toBeCloseTo(11.9, 10);
   });
 
-  it('4四半期の医師不足は20四半期経っても完全には回復しない', () => {
-    expect(a[23]!.patientStock).toBeLessThan(a[3]!.patientStock);
+  it('学費は開校から3年かけて 200 → 400 → 600 万円/月に増える', () => {
+    const tuition = (month: number) =>
+      deriveGroupTotals(run.months[month - 1]!).tuitionRevenue;
+    expect(tuition(12)).toBe(0);
+    expect(tuition(13)).toBeCloseTo(200, 6);
+    expect(tuition(25)).toBeCloseTo(400, 6);
+    expect(tuition(37)).toBeCloseTo(600, 6);
+    expect(tuition(120)).toBeCloseTo(600, 6);
   });
 
-  it('捌けなかった需要は翌期に繰り越さない', () => {
-    for (const q of run.quarters) {
-      for (const c of q.clinics) {
+  it('加算の要件割れは月単位で判定される', () => {
+    const lapsed = addonLapseMonths(run.months);
+    expect(lapsed.length).toBeGreaterThan(0);
+    // 機能強化加算は 7ヶ月目に取得、13ヶ月目に医師が抜けて落ちる
+    expect(lapsed[0]).toBe(13);
+  });
+
+  it('加算は5つ揃うと +19%', () => {
+    const last = run.months[119]!.fee;
+    expect(last.addons.every((a) => a.acquired && a.active)).toBe(true);
+    expect(last.addonTotal).toBeCloseTo(0.19, 10);
+  });
+
+  it('捌けなかった需要は翌月に繰り越さない', () => {
+    for (const t of run.months) {
+      for (const c of t.clinics) {
         expect(c.visitsServed).toBeLessThanOrEqual(c.effectiveCapacity + 1e-9);
         expect(c.visitsServed).toBeLessThanOrEqual(c.demandVisits + 1e-9);
       }
@@ -223,76 +162,67 @@ describe('検証済みの設計上の性質（回帰防止）', () => {
 });
 
 describe('通知イベント', () => {
-  it('待ち時間のピーク四半期には危機イベントが出る', () => {
-    const events = run.quarters[6]!.events;
+  it('待ち時間のピーク月には危機イベントが出る', () => {
+    const events = run.months[18]!.events;
     expect(events.some((e) => e.severity === 'critical' && e.screen === 'clinic')).toBe(true);
   });
 
-  it('加算が要件割れで落ちた四半期に通知が出る', () => {
-    const q5 = run.quarters[4]!.events;
-    expect(q5.some((e) => e.id.startsWith('addon-lapsed-'))).toBe(true);
+  it('改定は起きた月にだけ通知される（予告しない）', () => {
+    const revisionMonths = run.months
+      .filter((t) => t.events.some((e) => e.id.startsWith('fee-revision-')))
+      .map((t) => t.month);
+    expect(revisionMonths).toEqual([13, 37, 61, 85, 109]);
   });
 
-  it('改定は起きた四半期にだけ通知される（予告しない）', () => {
-    const revisionQuarters = run.quarters
-      .filter((q) => q.events.some((e) => e.id.startsWith('fee-revision-')))
-      .map((q) => q.quarter);
-    expect(revisionQuarters).toEqual([5, 13, 21, 29, 37]);
+  it('卒業生の入職は通知される', () => {
+    expect(run.months[48]!.events.some((e) => e.id.startsWith('school-graduation-'))).toBe(true);
   });
 });
 
 describe('会計の不変条件', () => {
-  it('40四半期すべてで貸借が一致する', () => {
-    for (const q of run.quarters) {
-      expect(() => assertBalanced(q.financials.balanceSheet), `Q${q.quarter}`).not.toThrow();
+  it('120ヶ月すべてで貸借が一致する', () => {
+    for (const t of run.months) {
+      expect(() => assertBalanced(t.financials.balanceSheet), `${t.month}ヶ月目`).not.toThrow();
     }
   });
 
-  it('未収金は保険診療収入の 0.67 四半期ぶん', () => {
-    for (const q of run.quarters) {
-      const bs = q.financials.balanceSheet;
+  it('未収金は保険診療収入の2ヶ月ぶん', () => {
+    for (const t of run.months) {
+      const bs = t.financials.balanceSheet;
       close(
         bs.accountsReceivable,
-        q.financials.incomeStatement.insuranceRevenue * 0.67,
+        t.financials.incomeStatement.insuranceRevenue * 2,
         1e-9,
-        `Q${q.quarter} 医業未収金`,
+        `${t.month}ヶ月目 医業未収金`,
       );
     }
   });
 
-  it('固定資産は取得の翌四半期から償却が始まる', () => {
-    // Q1 に A院を 6,000 万で取得。Q1 は償却なし、Q2 から医療機器 180 ＋ 内装 60
-    expect(run.quarters[0]!.financials.incomeStatement.depreciation).toBe(0);
-    close(run.quarters[1]!.financials.incomeStatement.depreciation, 240, 1e-9, 'Q2 減価償却費');
+  it('固定資産は取得の翌月から償却が始まる', () => {
+    // 1ヶ月目に A院を 6,000 万で取得。医療機器 3,600/60ヶ月 ＋ 内装 2,400/120ヶ月
+    expect(run.months[0]!.financials.incomeStatement.depreciation).toBe(0);
+    close(run.months[1]!.financials.incomeStatement.depreciation, 80, 1e-9, '2ヶ月目 減価償却費');
   });
 
   it('看護学校の 2.5 億は費用ではなく校舎という資産になる', () => {
-    const q5 = run.quarters[4]!.financials.balanceSheet;
-    close(q5.fixedAssetsByClass.building, 25000, 1e-9, 'Q5 校舎の簿価');
-    // 現金は減るが、その四半期に純資産は毀損しない（費用計上ではないため）
-    const q4 = run.quarters[3]!.financials.balanceSheet;
-    const equityDrop = q4.totalEquity - q5.totalEquity;
-    expect(equityDrop).toBeLessThan(25000);
+    const opening = run.months[12]!.financials.balanceSheet;
+    close(opening.fixedAssetsByClass.building, 25000, 1e-9, '13ヶ月目 校舎の簿価');
+    const before = run.months[11]!.financials.balanceSheet;
+    expect(before.totalEquity - opening.totalEquity).toBeLessThan(25000);
   });
 
   /**
-   * ★既定シナリオは Q12 で債務超過になる。
-   *
-   * エクセルは「最低現金 −1.8 億」しか見ていなかったが、発生主義で組むと
-   * 減価償却・本部費・支払利息が薄い営業利益を食い切っていることが分かる。
-   * B/S を入れた目的そのものなので、この四半期を回帰防止で固定しておく。
-   * シナリオ側の投資判断を変えるまで、ここは緑のままであるべき。
+   * ★既定シナリオは 34ヶ月目に債務超過へ入る。
+   * 四半期モデルで Q12（＝34〜36ヶ月目）だったのと一致する。刻みを変えても結論は動かない。
    */
-  it('既定シナリオが債務超過に入るのは Q12', () => {
-    const firstInsolvent = run.quarters.find((q) => q.financials.balanceSheet.totalEquity < 0);
-    expect(firstInsolvent?.quarter).toBe(12);
-    expect(run.quarters[10]!.financials.balanceSheet.totalEquity).toBeGreaterThan(0);
+  it('既定シナリオが債務超過に入るのは34ヶ月目', () => {
+    const first = run.months.find((t) => t.financials.balanceSheet.totalEquity < 0);
+    expect(first?.month).toBe(34);
   });
 
   it('資金ショートと債務超過は別々に判定される', () => {
-    // Q10 は現金がマイナスだが純資産は残っている＝つなぎ融資で越えられる谷
-    const q10 = run.quarters[9]!.financials.balanceSheet;
-    expect(q10.cash).toBeLessThan(0);
-    expect(q10.totalEquity).toBeGreaterThan(0);
+    const shortage = run.months.find((t) => t.financials.balanceSheet.cash < 0)!;
+    expect(shortage.month).toBeLessThan(34);
+    expect(shortage.financials.balanceSheet.totalEquity).toBeGreaterThan(0);
   });
 });

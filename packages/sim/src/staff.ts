@@ -4,7 +4,7 @@
  * 医師と看護師では詰まり方が違う。ここを混ぜると設計が崩れる。
  *
  *   医師   … 枠の問題。医局関係値と紹介会社でしか増やせない。金を積んでも即日は来ない
- *   看護師 … 流量の問題。市場からは四半期あたり 1.2 人しか採れない。学校を建てると
+ *   看護師 … 流量の問題。市場からは3ヶ月で 1.2 人しか採れない。学校を建てると
  *            3 年後から毎年まとまって入るが、定着するのは卒業生の 35% だけ
  *
  * 看護師は全社プールで持ち、各院へは医師数で按分する。
@@ -13,8 +13,8 @@
 import {
   NURSES_PER_DOCTOR,
   NURSE_ATTRITION_RATE,
-  NURSE_MARKET_HIRES_PER_QUARTER,
-  QUARTERS_PER_YEAR,
+  NURSE_MARKET_HIRES_PER_MONTH,
+  MONTHS_PER_YEAR,
   RELATION_PER_IGYOKU_SLOT,
   SCHOOL_CLASS_SIZE,
   SCHOOL_GRADUATION_RATE,
@@ -22,14 +22,14 @@ import {
   SCHOOL_TUITION_PER_YEAR,
   SCHOOL_YEARS,
 } from './constants';
-import type { ClinicId, Man, Quarter } from './types';
+import type { ClinicId, Man, Month } from './types';
 
-/** 1学年が卒業したときに自法人へ残る人数。40 × 85% × 35% = 11.9 */
+/** 1学年が卒業したときに自法人へ残る人数。40 × 85% × 35% = 11.9。年1回まとめて入る */
 export const SCHOOL_GRADUATES_PER_CLASS =
   SCHOOL_CLASS_SIZE * SCHOOL_GRADUATION_RATE * SCHOOL_RETENTION_RATE;
 
-/** 在学期間（四半期）。3年 = 12Q */
-export const SCHOOL_DURATION_QUARTERS = SCHOOL_YEARS * QUARTERS_PER_YEAR;
+/** 在学期間（月）。3年 = 36ヶ月 */
+export const SCHOOL_DURATION_MONTHS = SCHOOL_YEARS * MONTHS_PER_YEAR;
 
 /** 医局関係値から決まる派遣枠。20 ごとに 1 枠 */
 export function igyokuSlotsOf(relation: number): number {
@@ -46,38 +46,38 @@ export function nurseSufficiencyOf(nurses: number, required: number): number {
   return Math.min(1, nurses / required);
 }
 
-/** 卒業生が出る四半期か。開校の 3 年後から、毎年 1 学年ずつ */
-export function isGraduationQuarter(
-  quarter: Quarter,
-  schoolOpenedAtQuarter: Quarter | null,
+/** 卒業生が出る月か。開校の 3 年後から、毎年 1 学年ずつまとめて */
+export function isGraduationMonth(
+  month: Month,
+  schoolOpenedAtMonth: Month | null,
 ): boolean {
-  if (schoolOpenedAtQuarter === null) return false;
-  const elapsed = quarter - schoolOpenedAtQuarter;
-  return elapsed >= SCHOOL_DURATION_QUARTERS && elapsed % QUARTERS_PER_YEAR === 0;
+  if (schoolOpenedAtMonth === null) return false;
+  const elapsed = month - schoolOpenedAtMonth;
+  return elapsed >= SCHOOL_DURATION_MONTHS && elapsed % MONTHS_PER_YEAR === 0;
 }
 
 /** 在学中の学年数。学費はこの数だけ立つ */
 export function enrolledClasses(
-  quarter: Quarter,
-  schoolOpenedAtQuarter: Quarter | null,
+  month: Month,
+  schoolOpenedAtMonth: Month | null,
 ): number {
-  if (schoolOpenedAtQuarter === null || quarter < schoolOpenedAtQuarter) return 0;
+  if (schoolOpenedAtMonth === null || month < schoolOpenedAtMonth) return 0;
   let count = 0;
-  for (let enrolled = schoolOpenedAtQuarter; enrolled <= quarter; enrolled += QUARTERS_PER_YEAR) {
-    if (enrolled > quarter - SCHOOL_DURATION_QUARTERS) count++;
+  for (let enrolled = schoolOpenedAtMonth; enrolled <= month; enrolled += MONTHS_PER_YEAR) {
+    if (enrolled > month - SCHOOL_DURATION_MONTHS) count++;
   }
   return count;
 }
 
-/** 学費収入。年額を四半期に均す */
+/** 学費収入。年額を月に均す */
 export function tuitionRevenueFor(classes: number): Man {
-  return (classes * SCHOOL_CLASS_SIZE * SCHOOL_TUITION_PER_YEAR) / QUARTERS_PER_YEAR;
+  return (classes * SCHOOL_CLASS_SIZE * SCHOOL_TUITION_PER_YEAR) / MONTHS_PER_YEAR;
 }
 
 export interface NurseTickInput {
   previousNurses: number;
   required: number;
-  /** この四半期に入職する自校の卒業生 */
+  /** この月に入職する自校の卒業生 */
   graduates: number;
 }
 
@@ -92,13 +92,13 @@ export interface NurseTickOutput {
  *
  *   在籍 × (1 - 離職率) ＋ 卒業生 ＋ 市場採用（不足分まで、上限 1.2 人/Q）
  *
- * 必要数を超えては抱えない。医師が減った四半期に在籍が必要数まで落ちるのはこのため。
+ * 必要数を超えては抱えない。医師が減った月に在籍が必要数まで落ちるのはこのため。
  */
 export function tickNurses(input: NurseTickInput): NurseTickOutput {
   const retained = input.previousNurses * (1 - NURSE_ATTRITION_RATE);
   const fromSchool = input.graduates;
   const shortfall = Math.max(0, input.required - (retained + fromSchool));
-  const fromMarket = Math.min(NURSE_MARKET_HIRES_PER_QUARTER, shortfall);
+  const fromMarket = Math.min(NURSE_MARKET_HIRES_PER_MONTH, shortfall);
   const nurses = Math.min(input.required, retained + fromSchool + fromMarket);
   return { nurses, fromSchool, fromMarket };
 }

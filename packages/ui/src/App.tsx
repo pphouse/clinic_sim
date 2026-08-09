@@ -4,9 +4,9 @@
  * README の「診療所画面 1 枚で手触りを確認」のための最小構成。
  * 実装済みの画面は診療所だけ。マップも本社も無いので、ここは**足場**であって画面ではない。
  *
- * ★重要：意思決定を変えると、40四半期を丸ごと計算し直している。
+ * ★重要：意思決定を変えると、120ヶ月を丸ごと計算し直している。
  * シム核は純粋関数なので差分更新は要らないし、やってはいけない。
- * 「Q5の医師を1名戻す」を押した瞬間に、10年ぶんの未来が正しく組み替わる。
+ * 「13ヶ月目の医師を1名戻す」を押した瞬間に、10年ぶんの未来が正しく組み替わる。
  */
 import { useMemo, useState } from 'react';
 import {
@@ -14,13 +14,13 @@ import {
   CLINICS,
   runSimulation,
   type ClinicId,
-  type QuarterDecision,
+  type MonthDecision,
 } from '@med/sim';
 import { ClinicScreen, type ClinicTabId } from './screens/clinic/ClinicScreen';
 
 export function App() {
-  const [decisions, setDecisions] = useState<QuarterDecision[]>(BASELINE_SCENARIO.decisions);
-  const [quarter, setQuarter] = useState(1);
+  const [decisions, setDecisions] = useState<MonthDecision[]>(BASELINE_SCENARIO.decisions);
+  const [month, setMonth] = useState(1);
   const [clinicId, setClinicId] = useState<ClinicId>('A');
   const [tab, setTab] = useState<ClinicTabId>('overview');
   const [open, setOpen] = useState(true);
@@ -31,14 +31,14 @@ export function App() {
   );
 
   const modified = decisions !== BASELINE_SCENARIO.decisions;
-  const result = run.quarters[quarter - 1]!;
-  const previous = quarter > 1 ? run.quarters[quarter - 2]! : null;
+  const result = run.months[month - 1]!;
+  const previous = month > 1 ? run.months[month - 2]! : null;
   const clinicName = CLINICS.find((c) => c.id === clinicId)?.name ?? clinicId;
 
-  /** 表示中の四半期の医師配置を書き換える。以後の四半期にも効く（意思決定は据え置きが既定） */
+  /** 表示中の月の医師配置を書き換える。以後の月にも効く（意思決定は据え置きが既定） */
   function setDoctors(next: number) {
     setDecisions((current) => {
-      const index = current.findIndex((d) => d.quarter === quarter);
+      const index = current.findIndex((d) => d.month === month);
       if (index >= 0) {
         const updated = [...current];
         const target = current[index]!;
@@ -48,8 +48,8 @@ export function App() {
         };
         return updated;
       }
-      return [...current, { quarter, doctorsByClinic: { [clinicId]: next } }].sort(
-        (a, b) => a.quarter - b.quarter,
+      return [...current, { month, doctorsByClinic: { [clinicId]: next } }].sort(
+        (a, b) => a.month - b.month,
       );
     });
   }
@@ -75,11 +75,11 @@ export function App() {
       onTabChange={setTab}
       onClose={() => setOpen(false)}
       onDoctorsChange={setDoctors}
-      onQuarterChange={(delta) =>
-        setQuarter((q) => Math.min(run.quarters.length, Math.max(1, q + delta)))
+      onMonthChange={(delta) =>
+        setMonth((q) => Math.min(run.months.length, Math.max(1, q + delta)))
       }
-      canGoBack={quarter > 1}
-      canGoForward={quarter < run.quarters.length}
+      canGoBack={month > 1}
+      canGoForward={month < run.months.length}
       modified={modified}
       onReset={() => setDecisions(BASELINE_SCENARIO.decisions)}
     />

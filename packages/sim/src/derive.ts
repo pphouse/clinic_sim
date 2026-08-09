@@ -4,7 +4,7 @@
  * 同じ集計が複数画面に散ると必ずどこかがズレるので、
  * 「複数画面で使う数字」は例外なくこのファイルに置く。
  */
-import type { ClinicTick, GameEvent, Man, Quarter, QuarterResult, ScreenId } from './types';
+import type { ClinicTick, GameEvent, Man, Month, MonthResult, ScreenId } from './types';
 
 export interface GroupTotals {
   /** 診療収入（保険＋自費）。学費・賃料は含まない */
@@ -28,7 +28,7 @@ export interface GroupTotals {
   principalRepaid: Man;
 }
 
-export function deriveGroupTotals(result: QuarterResult): GroupTotals {
+export function deriveGroupTotals(result: MonthResult): GroupTotals {
   const is = result.financials.incomeStatement;
   const cf = result.financials.cashFlow;
 
@@ -52,7 +52,7 @@ export function deriveGroupTotals(result: QuarterResult): GroupTotals {
 }
 
 /** 全社の通院患者ストック。このゲームの実体資産 */
-export function totalPatientStock(result: QuarterResult): number {
+export function totalPatientStock(result: MonthResult): number {
   return result.clinics.reduce((sum, c) => sum + c.patientStock, 0);
 }
 
@@ -65,37 +65,37 @@ export function unservedVisits(tick: ClinicTick): number {
 }
 
 /** その画面に出すべき通知だけを拾う。UI はこれを数えてバッジにする */
-export function eventsForScreen(result: QuarterResult, screen: ScreenId): GameEvent[] {
+export function eventsForScreen(result: MonthResult, screen: ScreenId): GameEvent[] {
   return result.events.filter((e) => e.screen === screen);
 }
 
 /** いちばん詰まっている院。マップ画面のバッジはこれで決める */
-export function worstWait(result: QuarterResult): ClinicTick | null {
+export function worstWait(result: MonthResult): ClinicTick | null {
   const open = result.clinics.filter((c) => c.capacity > 0);
   if (open.length === 0) return null;
   return open.reduce((worst, c) => (c.waitMinutes > worst.waitMinutes ? c : worst));
 }
 
 /** 有利子負債の残高 */
-export function totalDebt(result: QuarterResult): Man {
+export function totalDebt(result: MonthResult): Man {
   const bs = result.financials.balanceSheet;
   return bs.shortTermDebt + bs.longTermDebt;
 }
 
 /**
- * 加算が「落ちていた」四半期。
+ * 加算が「落ちていた」月。
  *
  * AddonStatus.lapsedByRequirement は「取得済みだが要件を満たしていない」を素直に表す。
  * ただし取得しただけで一度も要件を満たしたことがない加算（既定シナリオの在宅療養支援加算が
  * まさにこれ）は、まだ何も失っていない。**失効＝一度手にしたものを落とすこと** なので、
  * 経理や厚生局の画面で「落ちていた期間」を出すときはこちらを使う。
  */
-export function addonLapseQuarters(quarters: QuarterResult[]): Quarter[] {
+export function addonLapseMonths(months: MonthResult[]): Month[] {
   const everActive = new Set<string>();
-  const lapsed: Quarter[] = [];
-  for (const result of quarters) {
+  const lapsed: Month[] = [];
+  for (const result of months) {
     if (result.fee.addons.some((a) => a.lapsedByRequirement && everActive.has(a.id))) {
-      lapsed.push(result.quarter);
+      lapsed.push(result.month);
     }
     for (const addon of result.fee.addons) {
       if (addon.active) everActive.add(addon.id);
@@ -105,7 +105,7 @@ export function addonLapseQuarters(quarters: QuarterResult[]): Quarter[] {
 }
 
 /** 患者ストックの加重平均で見た全社評判 */
-export function groupReputation(result: QuarterResult): number {
+export function groupReputation(result: MonthResult): number {
   const open = result.clinics.filter((c) => c.capacity > 0);
   const stock = open.reduce((sum, c) => sum + c.patientStock, 0);
   if (stock === 0) return 0;

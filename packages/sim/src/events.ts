@@ -2,21 +2,21 @@
  * 通知イベント。
  *
  * 原則：**起きたことだけを知らせる。予告しない。**
- * このゲームの遅延（4四半期）は設計の中心なので、先回りして警告を出すと
+ * このゲームの遅延（約1年）は設計の中心なので、先回りして警告を出すと
  * 「壊すのは一瞬、直すのは何年」という手触りが消える。
  *
  * 待ち時間や充足率のように「いま観測できる異常」は出す。
- * 「このままだと4四半期後に患者が減ります」は出さない。プレイヤーが読む。
+ * 「このままだと1年後に患者が減ります」は出さない。プレイヤーが読む。
  */
 import { ADDONS, REPUTATION_MIN, TOLERABLE_WAIT_MINUTES } from './constants';
 import { feeRevisionAt } from './fee';
-import type { AddonStatus, ClinicTick, GameEvent, Quarter, StaffTick } from './types';
+import type { AddonStatus, ClinicTick, GameEvent, Month, StaffTick } from './types';
 
 /** これを超えた待ち時間は危機。検証シナリオのピークは 53 分 */
 export const CRITICAL_WAIT_MINUTES = 45;
 
 export interface EventInput {
-  quarter: Quarter;
+  month: Month;
   clinics: ClinicTick[];
   clinicNames: Record<string, string>;
   staff: StaffTick;
@@ -31,8 +31,8 @@ export interface EventInput {
 
 export function collectEvents(input: EventInput): GameEvent[] {
   const events: GameEvent[] = [];
-  const q = input.quarter;
-  const push = (e: Omit<GameEvent, 'quarter'>) => events.push({ ...e, quarter: q });
+  const q = input.month;
+  const push = (e: Omit<GameEvent, 'month'>) => events.push({ ...e, month: q });
 
   // --- 診療所：待ち時間
   for (const clinic of input.clinics) {
@@ -110,7 +110,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
     const before = input.previousAddons.find((p) => p.id === status.id);
     const addon = ADDONS.find((a) => a.id === status.id);
     if (!addon) continue;
-    if (status.acquiredAtQuarter === q) {
+    if (status.acquiredAtMonth === q) {
       push({
         id: `addon-acquired-${status.id}`,
         severity: 'info',

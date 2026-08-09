@@ -5,18 +5,19 @@
  *
  *   常勤医 → 診察枠 → 実効枠 → 稼働率 → 待ち時間 → 評判・離脱 → 患者ストック → 収益
  *
- * **計算はしない。** 表示している数字は全て QuarterResult から読んだもの。
+ * **計算はしない。** 表示している数字は全て MonthResult から読んだもの。
  */
 import {
   ADDONS,
   CRITICAL_WAIT_MINUTES,
   REPUTATION_MIN,
   TOLERABLE_WAIT_MINUTES,
+  MONTHS_PER_YEAR,
   eventsForScreen,
-  quarterMonthsLabel,
+  monthLabel,
   unservedVisits,
   type ClinicId,
-  type QuarterResult,
+  type MonthResult,
 } from '@med/sim';
 import { ScreenShell, type ShellTab } from '../../components/ScreenShell';
 import { StatRow } from '../../components/StatRow';
@@ -28,16 +29,16 @@ export type ClinicTabId = 'overview' | 'patients' | 'income';
 export interface ClinicScreenProps {
   clinicId: ClinicId;
   clinicName: string;
-  /** 表示中の四半期の結果 */
-  result: QuarterResult;
-  /** 前四半期。期首の患者数を出すために読む */
-  previous: QuarterResult | null;
+  /** 表示中の月の結果 */
+  result: MonthResult;
+  /** 前月。月初の患者数を出すために読む */
+  previous: MonthResult | null;
   tab: ClinicTabId;
   onTabChange: (tab: ClinicTabId) => void;
   onClose: () => void;
   /** 操作系。sim の意思決定リストを書き換える */
   onDoctorsChange: (next: number) => void;
-  onQuarterChange: (delta: number) => void;
+  onMonthChange: (delta: number) => void;
   canGoBack: boolean;
   canGoForward: boolean;
   modified: boolean;
@@ -139,7 +140,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
     <ScreenShell
       domain="hq"
       title={props.clinicName}
-      subtitle={`${quarterMonthsLabel(result.quarter)}　東京都文京区本郷`}
+      subtitle={`${monthLabel(result.month)}　東京都文京区本郷`}
       icon={<ClinicIcon />}
       illustration={<ClinicIllustration crowding={clinic.utilization} />}
       portrait={<ManagerPortrait />}
@@ -155,7 +156,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
     >
       {!opened ? (
         <p style={{ color: 'var(--paper-dim)', fontSize: 'var(--text-body)' }}>
-          開院予定の期まで進めてください。
+          開院予定の月まで進めてください。
         </p>
       ) : (
         <>
@@ -212,7 +213,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
 
               {events.length > 0 && (
                 <>
-                  <SectionTitle>この期の通知</SectionTitle>
+                  <SectionTitle>今月の通知</SectionTitle>
                   {events.map((e) => (
                     <div
                       key={e.id}
@@ -248,7 +249,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
             <>
               <SectionTitle>患者ストックの増減</SectionTitle>
               <StatRow
-                label="期首の患者"
+                label="月初の患者"
                 value={people(
                   previous ? (previous.clinics.find((c) => c.id === clinicId)?.patientStock ?? 0) : 0,
                 )}
@@ -256,7 +257,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
               />
               <StatRow label="新規患者" value={people(clinic.newPatients)} unit="人" />
               <StatRow label="離脱率" value={percent(clinic.churnRate, 2)} unit="%" />
-              <StatRow label="期末の患者" value={people(clinic.patientStock)} unit="人" total />
+              <StatRow label="月末の患者" value={people(clinic.patientStock)} unit="人" total />
               <p
                 style={{
                   margin: 'var(--space-2) 0 0',
@@ -265,7 +266,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
                   lineHeight: 1.6,
                 }}
               >
-                新規患者は<strong>前の期の</strong>評判で決まる。ここが遅延の源泉。
+                新規患者は<strong>3ヶ月前の</strong>評判で決まる。ここが遅延の源泉。
               </p>
 
               <SectionTitle>捌けた診察</SectionTitle>
@@ -285,7 +286,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
                   lineHeight: 1.6,
                 }}
               >
-                溢れた分は収益にならず、翌期にも繰り越さない。永久に失われる。
+                溢れた分は収益にならず、翌月にも繰り越さない。永久に失われる。
               </p>
             </>
           )}
@@ -351,7 +352,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
 
 /**
  * 操作卓。親指の届く画面下半分に固定する（CLAUDE.md §5）。
- * 医師を増減すると意思決定の列が書き換わり、40四半期が丸ごと計算し直される。
+ * 医師を増減すると意思決定の列が書き換わり、120ヶ月が丸ごと計算し直される。
  */
 function ControlDock(
   props: ClinicScreenProps & { doctors: number; opened: boolean },
@@ -410,19 +411,28 @@ function ControlDock(
           marginTop: 'var(--space-3)',
         }}
       >
-        <StepButton
-          label="前の期へ"
-          glyph="◀"
-          disabled={!props.canGoBack}
-          onClick={() => props.onQuarterChange(-1)}
-        />
+        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          <StepButton
+            label="1年戻る"
+            glyph="◀◀"
+            small
+            disabled={!props.canGoBack}
+            onClick={() => props.onMonthChange(-MONTHS_PER_YEAR)}
+          />
+          <StepButton
+            label="前の月へ"
+            glyph="◀"
+            disabled={!props.canGoBack}
+            onClick={() => props.onMonthChange(-1)}
+          />
+        </div>
         <div style={{ textAlign: 'center' }}>
           <div
-            data-testid="quarter-label"
-            data-quarter={props.result.quarter}
+            data-testid="month-label"
+            data-month={props.result.month}
             style={{ fontSize: 'var(--text-body)', fontWeight: 600, whiteSpace: 'nowrap' }}
           >
-            {quarterMonthsLabel(props.result.quarter)}
+            {monthLabel(props.result.month)}
           </div>
           {props.modified && (
             <button
@@ -443,12 +453,21 @@ function ControlDock(
             </button>
           )}
         </div>
-        <StepButton
-          label="次の期へ"
-          glyph="▶"
-          disabled={!props.canGoForward}
-          onClick={() => props.onQuarterChange(1)}
-        />
+        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          <StepButton
+            label="次の月へ"
+            glyph="▶"
+            disabled={!props.canGoForward}
+            onClick={() => props.onMonthChange(1)}
+          />
+          <StepButton
+            label="1年進む"
+            glyph="▶▶"
+            small
+            disabled={!props.canGoForward}
+            onClick={() => props.onMonthChange(MONTHS_PER_YEAR)}
+          />
+        </div>
       </div>
     </div>
   );
@@ -459,11 +478,13 @@ function StepButton({
   glyph,
   onClick,
   disabled,
+  small,
 }: {
   label: string;
   glyph: string;
   onClick: () => void;
   disabled?: boolean;
+  small?: boolean;
 }) {
   return (
     <button
@@ -472,13 +493,13 @@ function StepButton({
       onClick={onClick}
       disabled={disabled}
       style={{
-        width: 44,
+        width: small ? 34 : 44,
         height: 44,
         borderRadius: 'var(--radius-sm)',
         border: '1px solid var(--ink-600)',
         background: disabled ? 'transparent' : 'var(--ink-700)',
         color: disabled ? 'var(--paper-mute)' : 'var(--paper)',
-        fontSize: 18,
+        fontSize: small ? 12 : 18,
         cursor: disabled ? 'default' : 'pointer',
       }}
     >

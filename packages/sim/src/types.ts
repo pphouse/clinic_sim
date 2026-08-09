@@ -2,13 +2,13 @@
  * シミュレーション核の型定義。
  *
  * 金額は全て「万円」単位の number。表示時に円へ変換する。
- * 時刻は四半期インデックス（1 始まり）のみ。Date を使わない。
+ * 時刻は月インデックス（1 始まり、1〜120）のみ。Date を使わない。
  */
 
 // ---------------------------------------------------------------- 基本
 
-/** 四半期インデックス（1 = Y1Q1） */
-export type Quarter = number;
+/** 月インデックス（1 = 1年目4月）。年度は4月始まり */
+export type Month = number;
 
 /** 万円単位の金額 */
 export type Man = number;
@@ -28,9 +28,9 @@ export interface Rng {
 export interface ClinicConfig {
   id: ClinicId;
   name: string;
-  /** 開院する四半期 */
-  openQuarter: Quarter;
-  /** 四半期あたりの新規患者ポテンシャル（評判 75 のとき） */
+  /** 開院する月 */
+  openMonth: Month;
+  /** 1ヶ月あたりの新規患者ポテンシャル（評判 75 のとき） */
   newPatientPotential: number;
   /** 承継開業なら引き継ぐ患者数。新規開業は 0 */
   initialPatientStock: number;
@@ -42,10 +42,15 @@ export interface ClinicState {
   patientStock: number;
   /** 評判 20〜100。落ちるのは速く、戻るのは遅い */
   reputation: number;
+  /**
+   * 直近の評判の履歴（新しい順）。新規患者は3ヶ月前の評判で決まるので、
+   * NEW_PATIENT_REPUTATION_LAG_MONTHS 件だけ持ち歩く。セーブデータにも要る。
+   */
+  reputationHistory: number[];
   doctors: number;
 }
 
-/** 1 四半期の診療所シミュレーション結果 */
+/** 1 ヶ月の診療所シミュレーション結果 */
 export interface ClinicTick {
   id: ClinicId;
   newPatients: number;
@@ -96,7 +101,7 @@ export interface StaffTick {
 export interface FeeRevision {
   id: string;
   name: string;
-  effectiveQuarter: Quarter;
+  effectiveMonth: Month;
   /** 基礎点数の変動率。-0.04 = 4% 減 */
   rate: number;
 }
@@ -112,13 +117,13 @@ export interface Addon {
   /** 施設基準：必要な看護師充足率 */
   requiredNurseSufficiency: number;
   /** 制度上の期限 */
-  expiresAtQuarter: Quarter;
+  expiresAtMonth: Month;
 }
 
 export interface AddonStatus {
   id: string;
   acquired: boolean;
-  acquiredAtQuarter: Quarter | null;
+  acquiredAtMonth: Month | null;
   /** 要件を満たしていて、かつ期限内 */
   active: boolean;
   /** 取得済みだが要件を割って落ちている */
@@ -147,10 +152,10 @@ export interface FixedAsset {
   id: string;
   name: string;
   assetClass: AssetClass;
-  acquiredAtQuarter: Quarter;
+  acquiredAtMonth: Month;
   acquisitionCost: Man;
-  /** 耐用年数（四半期数）。医療機器 20Q、内装 40Q、校舎 80Q */
-  usefulLifeQuarters: number;
+  /** 耐用年数（月数）。医療機器 60、内装 120、校舎 240 */
+  usefulLifeMonths: number;
   /** 残存簿価 */
   bookValue: Man;
 }
@@ -160,10 +165,10 @@ export interface Loan {
   name: string;
   principal: Man;
   outstanding: Man;
-  /** 四半期あたりの金利 */
-  quarterlyRate: number;
-  /** 残高に対する四半期あたりの元金返済率 */
-  quarterlyRepaymentRate: number;
+  /** 1ヶ月あたりの金利 */
+  monthlyRate: number;
+  /** 残高に対する1ヶ月あたりの元金返済率 */
+  monthlyRepaymentRate: number;
 }
 
 /** 損益計算書 */
@@ -214,7 +219,7 @@ export interface IncomeStatement {
 export interface BalanceSheet {
   // 資産
   cash: Man;
-  /** 医業未収金。レセプトは約 2 ヶ月遅れで入金される */
+  /** 医業未収金。レセプトは 2 ヶ月遅れで入金される */
   accountsReceivable: Man;
   inventory: Man;
   currentAssets: Man;
@@ -259,7 +264,7 @@ export interface CashFlowStatement {
 }
 
 export interface FinancialStatements {
-  quarter: Quarter;
+  month: Month;
   incomeStatement: IncomeStatement;
   balanceSheet: BalanceSheet;
   cashFlow: CashFlowStatement;
@@ -268,13 +273,13 @@ export interface FinancialStatements {
 // ---------------------------------------------------------------- 全体
 
 export interface GameState {
-  quarter: Quarter;
+  month: Month;
   rngSeed: number;
   clinics: ClinicState[];
   igyokuRelation: number;
   agencyHiresCumulative: number;
   nurses: number;
-  schoolOpenedAtQuarter: Quarter | null;
+  schoolOpenedAtMonth: Month | null;
   addons: AddonStatus[];
   assets: FixedAsset[];
   loans: Loan[];
@@ -284,9 +289,9 @@ export interface GameState {
   retainedEarnings: Man;
 }
 
-/** 1 四半期の全出力。UI はこれだけを読む */
-export interface QuarterResult {
-  quarter: Quarter;
+/** 1 ヶ月の全出力。UI はこれだけを読む */
+export interface MonthResult {
+  month: Month;
   label: string;
   clinics: ClinicTick[];
   staff: StaffTick;
@@ -297,7 +302,7 @@ export interface QuarterResult {
 
 export interface GameEvent {
   id: string;
-  quarter: Quarter;
+  month: Month;
   severity: 'info' | 'warning' | 'critical';
   /** UI の通知バッジをどの画面に出すか */
   screen: ScreenId;

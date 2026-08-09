@@ -5,7 +5,7 @@
  *   node packages/ui/e2e/tour.mjs
  *
  * 目的は見た目の確認ではなく、**中核ループが操作で体感できるか**の確認。
- * Q5 に医師を1名戻すと、Q7 の待ち時間と Q11 の患者ストックがどう変わるかを
+ * 13ヶ月目に医師を1名戻すと、19ヶ月目の待ち時間と33ヶ月目の患者ストックがどう変わるかを
  * 同じ画面の中で往復して見せる。ここが面白くなければ残り15画面を作っても面白くならない。
  */
 import { chromium } from 'playwright';
@@ -36,74 +36,78 @@ const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
  * 表示中の四半期。画面のラベルは月表記なので、位置合わせは data-quarter で行う。
  * 表示文字列で待ち合わせると、文言を変えるたびにツアーが壊れる。
  */
-const currentQuarter = async () =>
-  Number(await page.getByTestId('quarter-label').getAttribute('data-quarter'));
+const currentMonth = async () =>
+  Number(await page.getByTestId('month-label').getAttribute('data-month'));
 
-async function goToQuarter(target) {
-  for (let i = 0; i < 45; i++) {
-    const now = await currentQuarter();
+/** 1年送りと1ヶ月送りを組み合わせて目的の月まで動かす */
+async function goToMonth(target) {
+  for (let i = 0; i < 140; i++) {
+    const now = await currentMonth();
     if (now === target) return;
-    await page.getByLabel(now < target ? '次の期へ' : '前の期へ').click();
-    await page.waitForTimeout(220);
+    const gap = target - now;
+    const label =
+      gap >= 12 ? '1年進む' : gap <= -12 ? '1年戻る' : gap > 0 ? '次の月へ' : '前の月へ';
+    await page.getByLabel(label).click();
+    await page.waitForTimeout(gap >= 12 || gap <= -12 ? 320 : 180);
   }
-  throw new Error(`Q${target} まで移動できなかった`);
+  throw new Error(`${target}ヶ月目まで移動できなかった`);
 }
 
 await page.goto(BASE);
-await page.waitForSelector('[data-testid="quarter-label"]');
+await page.waitForSelector('[data-testid="month-label"]');
 await beat(1600);
-await shot('01-y1q1-overview');
+await shot('01-m01-overview');
 
 // --- 平常時。待ち時間15分、評判75
-await goToQuarter(4);
+await goToMonth(12);
 await beat(1200);
-await shot('02-y1q4-overview');
+await shot('02-m12-overview');
 
-// --- Q5 に常勤医が1名抜ける。待ち時間が跳ねる
-await goToQuarter(5);
+// --- 13ヶ月目に常勤医が1名抜ける。待ち時間が跳ねる
+await goToMonth(13);
 await beat(1500);
-await shot('03-y2q1-doctor-lost');
+await shot('03-m13-doctor-lost');
 
-// --- Q7 が待ち時間のピーク。53分
-await goToQuarter(7);
+// --- 19ヶ月目＝B院の開院月。全社の看護師が薄まり、待ち時間がピークを打つ
+await goToMonth(19);
 await beat(1800);
-await shot('04-y2q3-wait-peak');
+await shot('04-m19-wait-peak');
 
 await page.getByRole('button', { name: '患者' }).click();
 await beat(1800);
-await shot('05-y2q3-patients');
+await shot('05-m19-patients');
 
-// --- 患者ストックの底は Q11。ピークから4四半期おくれてやってくる
-await goToQuarter(11);
+// --- 患者ストックの底は32〜38ヶ月目。ピークから約1年おくれてやってくる
+await goToMonth(33);
 await beat(1800);
-await shot('06-y3q3-stock-trough');
+await shot('06-m33-stock-trough');
 
 await page.getByRole('button', { name: '収支' }).click();
 await beat(1600);
-await shot('07-y3q3-income');
+await shot('07-m33-income');
 
-// --- ここから「もし Q5 に医師を戻していたら」を同じ画面で比べる
+// --- ここから「もし13ヶ月目に医師を戻していたら」を同じ画面で比べる
 await page.getByRole('button', { name: '概要' }).click();
-await goToQuarter(5);
+await goToMonth(13);
 await beat(1400);
 await page.getByLabel('常勤医を増やす').click();
 await beat(1800);
-await shot('08-y2q1-doctor-restored');
+await shot('08-m13-doctor-restored');
 
-await goToQuarter(7);
+await goToMonth(19);
 await beat(1800);
-await shot('09-y2q3-after-fix');
+await shot('09-m19-after-fix');
 
-await goToQuarter(11);
+await goToMonth(33);
 await beat(1600);
-await shot('10-y3q3-after-fix');
+await shot('10-m33-after-fix');
 
 // --- 既定シナリオへ戻す
 await page.getByRole('button', { name: '既定シナリオに戻す' }).click();
 await beat(1600);
-await shot('11-y3q3-reset');
+await shot('11-m33-reset');
 
-// --- 分院へ。B院は Q7 に開院する
+// --- 分院へ。B院は19ヶ月目に開院する
 await page.getByLabel('閉じる').click();
 await beat(1200);
 await page.getByRole('button', { name: 'B院' }).click();
