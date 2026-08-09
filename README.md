@@ -18,9 +18,19 @@
 
 - [x] シミュレーションモデルの検証（表計算で40四半期）
 - [x] ゴールデンテスト用データの固定
-- [ ] **シム核の実装** ← いまここ。単一ブランチ、並列禁止
-- [ ] 診療所画面 1 枚で手触りを確認
+- [x] **シム核の実装** — 40四半期が自走し、ゴールデンテストが全て緑
+- [ ] **診療所画面 1 枚で手触りを確認** ← いまここ
 - [ ] 残り 15 画面を並列実装
+
+シム核は意思決定の列（`BASELINE_SCENARIO`）だけを入力に 40 四半期を回す。
+
+```ts
+import { runSimulation, deriveGroupTotals } from '@med/sim';
+
+const { quarters } = runSimulation();
+quarters[6].clinics[0].waitMinutes;   // 53.19 分。既定シナリオの待ち時間ピーク
+deriveGroupTotals(quarters[39]);      // 全社の集計。UI はここを読む
+```
 
 ## セットアップ
 
