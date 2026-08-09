@@ -181,6 +181,8 @@ export interface IncomeStatement {
   tuitionRevenue: Man;
   /** 賃料収入（門前薬局など） */
   rentalRevenue: Man;
+  /** 受託収入（休日当番医・学校医・自治体健診）。実務でいう「その他医業収入」 */
+  contractRevenue: Man;
   totalRevenue: Man;
 
   /** 医薬品・診療材料費 */
@@ -201,6 +203,10 @@ export interface IncomeStatement {
   agencyFees: Man;
   /** 医局関係維持費 */
   igyokuRelationCost: Man;
+  /** 外部関係の活動費（医師会・連携基幹病院・ケアマネ） */
+  externalRelationCost: Man;
+  /** 電子カルテ・AI の月額、機器のリース料と保守料 */
+  systemCost: Man;
   /** 本部費 */
   headquarters: Man;
   totalExpenses: Man;
@@ -270,7 +276,165 @@ export interface FinancialStatements {
   cashFlow: CashFlowStatement;
 }
 
+// ---------------------------------------------------------------- 拡張系
+//
+// 検証モデル（med_sim2.xlsx）に無い後付けの系。**既定では全て眠っている。**
+// 意思決定で起こさない限り、値は 0 と null のままで、係数は 1 のまま。
+// この性質があるので、足しても検証済みのゴールデンが動かない。
+
+/** 外部関係の相手。医局（igyoku）とは別系統 */
+export type ExternalRelationId = 'medicalAssociation' | 'referralHospital' | 'careManager';
+
+/** 電子カルテのティア。null は紙カルテ */
+export type EmrTier = 'single' | 'chain' | 'enterprise';
+
+export interface RelationView {
+  id: ExternalRelationId;
+  name: string;
+  /** 0〜100 */
+  value: number;
+  /** 今月、活動に出たか */
+  active: boolean;
+  monthlyCost: Man;
+  effect: string;
+}
+
+export interface RelationsTick {
+  relations: RelationView[];
+  /** 医師会の受託収入（休日当番医・学校医・健診） */
+  contractRevenue: Man;
+  /** 基幹病院からの紹介による新規患者の上乗せ率 */
+  referralUplift: number;
+  /** ケアマネ経由の在宅比率 */
+  homeCareShare: number;
+  totalCost: Man;
+}
+
+export interface EquipmentView {
+  id: string;
+  name: string;
+  price: Man;
+  /** 取得済みか */
+  owned: boolean;
+  /** リースなら true。B/S に載らない */
+  leased: boolean;
+  /** 故障中。保守未加入のときだけ起きる */
+  broken: boolean;
+  /** 復旧する月 */
+  repairedAtMonth: Month | null;
+  /** 稼働しているときの自費収入の上乗せ率 */
+  selfPayUplift: number;
+  /** 簿価。リースは 0 */
+  bookValue: Man;
+}
+
+export interface AiToolView {
+  id: string;
+  name: string;
+  adopted: boolean;
+  upfrontCost: Man;
+  recurringCost: Man;
+  visitsPerDoctorPerDayBonus: number;
+}
+
+export interface VendorTick {
+  emrTier: EmrTier | null;
+  emrTierName: string;
+  /** 移行の痛みが続いている最中か */
+  migrating: boolean;
+  migrationMonthsLeft: number;
+  /** 移行中に落ちている診察枠の率 */
+  migrationCapacityPenalty: number;
+  equipment: EquipmentView[];
+  aiTools: AiToolView[];
+  /** AI による医師1人1日あたりの上乗せ */
+  extraVisitsPerDoctorPerDay: number;
+  /** 稼働中の機器による自費収入の上乗せ率 */
+  equipmentSelfPayUplift: number;
+  maintenanceContract: boolean;
+  /** カルテ月額＋AI月額＋保守料＋リース料 */
+  recurringCost: Man;
+  leaseExpense: Man;
+}
+
+export interface PharmacyView {
+  clinicId: ClinicId;
+  clinicName: string;
+  invited: boolean;
+  invitedAtMonth: Month | null;
+  /** 今月の賃料収入。定額＋患者数の歩合 */
+  rent: Man;
+}
+
+export interface PharmacyTick {
+  pharmacies: PharmacyView[];
+  rentalRevenue: Man;
+}
+
+export interface PropertyView {
+  clinicId: ClinicId;
+  clinicName: string;
+  owned: boolean;
+  ownedSinceMonth: Month | null;
+  price: Man;
+  bookValue: Man;
+  /** 保有に切り替えて消えた家賃（万円/月） */
+  rentSaved: Man;
+}
+
+export interface RealEstateTick {
+  properties: PropertyView[];
+  rentSaved: Man;
+  bookValue: Man;
+}
+
+export interface PersonalAssetView {
+  id: string;
+  name: string;
+  price: Man;
+  prestige: number;
+  note: string;
+  owned: boolean;
+}
+
+export interface PersonalTick {
+  /** 今月の役員報酬（法人の費用） */
+  salary: Man;
+  /** 税・社会保険を引いた手取り */
+  netSalary: Man;
+  cumulativeSalary: Man;
+  cash: Man;
+  assets: PersonalAssetView[];
+  assetValue: Man;
+  prestige: number;
+  rank: string;
+  /** 個人の現金＋見栄資産の取得価額 */
+  netWorth: Man;
+}
+
+/** 拡張系の1ヶ月ぶんの出力。既定シナリオでは全て「何も起きていない」形になる */
+export interface ExpansionTick {
+  relations: RelationsTick;
+  vendor: VendorTick;
+  pharmacy: PharmacyTick;
+  realEstate: RealEstateTick;
+  personal: PersonalTick;
+  /** 診察枠に掛かった係数の合計。1 なら誰も枠を削っていない */
+  capacityMultiplier: number;
+  newPatientMultiplier: number;
+  selfPayMultiplier: number;
+}
+
 // ---------------------------------------------------------------- 全体
+
+/** 保有機器の実体。UI ではなく state が持つ */
+export interface OwnedEquipment {
+  id: string;
+  leased: boolean;
+  acquiredAtMonth: Month;
+  /** 故障中なら復旧月。null なら稼働中 */
+  repairedAtMonth: Month | null;
+}
 
 export interface GameState {
   month: Month;
@@ -287,6 +451,25 @@ export interface GameState {
   accountsReceivable: Man;
   paidInCapital: Man;
   retainedEarnings: Man;
+
+  // ---- 拡張系。既定では空・null・0
+  externalRelations: Record<ExternalRelationId, number>;
+  /** いま活動を続けている相手 */
+  externalRelationActive: Record<ExternalRelationId, boolean>;
+  emrTier: EmrTier | null;
+  /** 移行の痛みが終わる月 */
+  emrMigrationEndsAtMonth: Month | null;
+  aiTools: string[];
+  equipment: OwnedEquipment[];
+  maintenanceContract: boolean;
+  /** 門前薬局を誘致した月。院ごと */
+  pharmacyInvitedAt: Record<ClinicId, Month>;
+  /** 物件を取得した月。院ごと */
+  propertyOwnedSince: Record<ClinicId, Month>;
+  executiveSalary: Man;
+  cumulativeExecutiveSalary: Man;
+  personalCash: Man;
+  personalAssets: string[];
 }
 
 /** 1 ヶ月の全出力。UI はこれだけを読む */
@@ -298,6 +481,8 @@ export interface MonthResult {
   fee: FeeTick;
   financials: FinancialStatements;
   events: GameEvent[];
+  /** 拡張系。既定シナリオでは全項目が「何もしていない」状態で返る */
+  expansion: ExpansionTick;
 }
 
 export interface GameEvent {
@@ -328,4 +513,5 @@ export type ScreenId =
   | 'realEstate'
   | 'accounting'
   | 'personnel'
+  | 'vendor'
   | 'personalWealth';

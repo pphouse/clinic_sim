@@ -6,14 +6,28 @@
  */
 import {
   CLINICS,
+  EMR_TIERS,
   MONTHS_PER_YEAR,
+  PROPERTY_PRICE,
   REPUTATION_MAX,
   REPUTATION_MIN,
   TOLERABLE_WAIT_MINUTES,
+  emrMigrationCost,
 } from './constants';
 import { SCHOOL_DURATION_MONTHS, SCHOOL_GRADUATES_PER_CLASS, enrolledClasses } from './staff';
 import { CRITICAL_WAIT_MINUTES } from './events';
-import type { ClinicId, ClinicTick, GameEvent, Man, Month, MonthResult, ScreenId } from './types';
+import type {
+  ClinicId,
+  ClinicTick,
+  EmrTier,
+  ExternalRelationId,
+  GameEvent,
+  Man,
+  Month,
+  MonthResult,
+  RelationView,
+  ScreenId,
+} from './types';
 
 export interface GroupTotals {
   /** 診療収入（保険＋自費）。学費・賃料は含まない */
@@ -329,4 +343,127 @@ export function schoolStatus(months: MonthResult[], upToMonth: Month): SchoolSta
     graduatesPerClass: SCHOOL_GRADUATES_PER_CLASS,
     graduatedThisMonth: current.staff.nursesFromSchool,
   };
+}
+
+// ==================================================================
+// 拡張系の derive（外部関係・商社・薬局・不動産・個人資産）
+//
+// **画面で計算しない**（CLAUDE.md §2）。7画面ぶんの「並べる前のひと手間」を
+// ここに集める。同じ計算が画面ごとに散ると必ずどこかがズレる。
+// ==================================================================
+
+/** 外部関係の推移。折れ線に渡す */
+export function relationSeries(
+  months: MonthResult[],
+  id: ExternalRelationId,
+  upToMonth: Month,
+  count: number,
+): number[] {
+  const end = Math.min(upToMonth, months.length);
+  const start = Math.max(1, end - count + 1);
+  const values: number[] = [];
+  for (let m = start; m <= end; m++) {
+    const view = months[m - 1]?.expansion.relations.relations.find((r) => r.id === id);
+    if (view) values.push(view.value);
+  }
+  return values;
+}
+
+export function relationView(result: MonthResult, id: ExternalRelationId): RelationView | undefined {
+  return result.expansion.relations.relations.find((r) => r.id === id);
+}
+
+/**
+ * カルテ移行の見積り。**待つことのコストを数字にする**のがこの関数の唯一の仕事
+ * （docs/spec/screens/vendor.md）。
+ *
+ * 12ヶ月後の患者数は、直近12ヶ月の実績から素直に線形で伸ばす。
+ * 予測を凝ってもゲームの判断は変わらないし、外れたときに嘘をついたことになる。
+ */
+export interface EmrMigrationOutlook {
+  tier: EmrTier;
+  tierName: string;
+  /** 現在のティアと同じなら移行の必要が無い */
+  current: boolean;
+  costNow: Man;
+  costIn12Months: Man;
+  /** 1年待つと増える額 */
+  costOfWaiting: Man;
+  capacityPenalty: number;
+  penaltyMonths: number;
+}
+
+export function emrMigrationOutlook(
+  months: MonthResult[],
+  upToMonth: Month,
+): EmrMigrationOutlook[] {
+  const current = months[upToMonth - 1];
+  const stockNow = current ? totalPatientStock(current) : 0;
+
+  const ago = months[Math.max(0, upToMonth - 1 - MONTHS_PER_YEAR)];
+  const stockAgo = ago ? totalPatientStock(ago) : stockNow;
+  const projected = Math.max(0, stockNow + (stockNow - stockAgo));
+
+  return EMR_TIERS.map((tier) => {
+    const costNow = emrMigrationCost(tier, stockNow);
+    const costIn12Months = emrMigrationCost(tier, projected);
+    return {
+      tier: tier.id,
+      tierName: tier.name,
+      current: current?.expansion.vendor.emrTier === tier.id,
+      costNow,
+      costIn12Months,
+      costOfWaiting: costIn12Months - costNow,
+      capacityPenalty: tier.migrationCapacityPenalty,
+      penaltyMonths: tier.migrationPenaltyMonths,
+    };
+  });
+}
+
+/** 門前薬局の賃料収入の推移 */
+export function pharmacyRentSeries(
+  months: MonthResult[],
+  upToMonth: Month,
+  count: number,
+): number[] {
+  const end = Math.min(upToMonth, months.length);
+  const start = Math.max(1, end - count + 1);
+  const values: number[] = [];
+  for (let m = start; m <= end; m++) {
+    const tick = months[m - 1];
+    if (tick) values.push(tick.expansion.pharmacy.rentalRevenue);
+  }
+  return values;
+}
+
+/**
+ * 物件を買ったときの回収年数。
+ * 家賃が消えるだけなので、割引もキャピタルゲインも見ない。**単純な割り算**。
+ */
+export function propertyPaybackYears(rentSavedPerMonth: Man): number | null {
+  if (rentSavedPerMonth <= 0) return null;
+  return PROPERTY_PRICE / (rentSavedPerMonth * MONTHS_PER_YEAR);
+}
+
+/** 個人資産の推移（現金＋見栄資産の取得価額） */
+export function personalNetWorthSeries(
+  months: MonthResult[],
+  upToMonth: Month,
+  count: number,
+): number[] {
+  const end = Math.min(upToMonth, months.length);
+  const start = Math.max(1, end - count + 1);
+  const values: number[] = [];
+  for (let m = start; m <= end; m++) {
+    const tick = months[m - 1];
+    if (tick) values.push(tick.expansion.personal.netWorth);
+  }
+  return values;
+}
+
+/** その見栄資産があと何ヶ月の手取りで買えるか。買えないものに「あと◯ヶ月」を出す */
+export function monthsToAfford(price: Man, cash: Man, netSalaryPerMonth: Man): number | null {
+  if (cash >= price) return 0;
+  if (netSalaryPerMonth <= 0) return null;
+  return Math.ceil((price - cash) / netSalaryPerMonth);
 }

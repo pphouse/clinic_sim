@@ -126,11 +126,12 @@ export function buildStatements(input: BuildStatementsInput): FinancialStatement
   const is = input.incomeStatement;
 
   const totalRevenue =
-    is.insuranceRevenue + is.selfPayRevenue + is.tuitionRevenue + is.rentalRevenue;
+    is.insuranceRevenue + is.selfPayRevenue + is.tuitionRevenue + is.rentalRevenue +
+    is.contractRevenue;
   const totalExpenses =
     is.medicalSupplies + is.doctorPayroll + is.nursePayroll + is.otherPayroll +
     is.rent + is.depreciation + is.schoolOperating + is.agencyFees +
-    is.igyokuRelationCost + is.headquarters;
+    is.igyokuRelationCost + is.externalRelationCost + is.systemCost + is.headquarters;
 
   const operatingIncome = totalRevenue - totalExpenses;
   const ordinaryIncome = operatingIncome - is.interestExpense;

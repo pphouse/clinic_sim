@@ -8,7 +8,7 @@
  * そのまま意思決定として書き下したもの。ゴールデンテストの入力になる。
  * **この列を変えるとゴールデンテストが落ちる。**
  */
-import type { ClinicId, Month } from './types';
+import type { ClinicId, EmrTier, ExternalRelationId, Man, Month } from './types';
 
 /** ある月にプレイヤーが下す意思決定。省略した項目は「前月のまま」 */
 export interface MonthDecision {
@@ -34,6 +34,32 @@ export interface MonthDecision {
    * 払わないと関係値が RELATION_DECAY_PER_MONTH ずつ落ちる。
    */
   maintainIgyoku?: boolean;
+
+  // ---- ここから下は拡張系（docs/spec/screens/ の未着手7画面）。
+  // **省略時は「何もしない」。** 既定シナリオは1つも書いていないので、
+  // 追加しても検証済みの結果は動かない。
+
+  /**
+   * 外部関係の活動を続けるか。書いた相手だけが変わり、書かなかった相手は据え置き。
+   * 活動していない相手は関係値が毎月落ちる（一度も上げていなければ 0 のまま）。
+   */
+  relationActivity?: Partial<Record<ExternalRelationId, boolean>>;
+  /** 電子カルテを乗り換える。移行中は診察枠が落ちる */
+  migrateEmr?: EmrTier;
+  /** 導入する AI の id。枠は増えるが施設基準の医師数には数えない */
+  adoptAiTools?: string[];
+  /** 医療機器を入れる。lease なら B/S に載らない代わりに総額が高い */
+  buyEquipment?: { id: string; lease?: boolean }[];
+  /** 保守契約に入るか。切ると故障が起きて自費の上乗せを失う */
+  maintenanceContract?: boolean;
+  /** 門前薬局を誘致する院 */
+  invitePharmacy?: ClinicId[];
+  /** テナントから自社保有に切り替える院 */
+  buyProperty?: ClinicId[];
+  /** 役員報酬（万円/月）。EXECUTIVE_SALARY_MAX で頭打ち */
+  executiveSalary?: Man;
+  /** 個人で買うもの。法人の数字には効かない */
+  buyPersonalAssets?: string[];
 }
 
 export interface Scenario {

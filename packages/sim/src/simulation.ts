@@ -37,7 +37,32 @@ import {
   USEFUL_LIFE_EQUIPMENT,
   USEFUL_LIFE_INTERIOR,
   ADDONS,
+  AI_TOOLS,
+  EQUIPMENT_CATALOG,
+  EXECUTIVE_SALARY_MAX,
+  MEDICAL_ASSOCIATION_OPENING_PENALTY,
+  PERSONAL_ASSETS,
+  PHARMACY_INVITE_CAPEX,
+  PERSONAL_TAX_RATE,
+  PROPERTY_PRICE,
 } from './constants';
+import {
+  advanceRelations,
+  initialRelationActivity,
+  initialRelations,
+  migrationCostFor,
+  personalTickOf,
+  pharmacyTickOf,
+  realEstateTickOf,
+  relationCapacityMultiplier,
+  relationSelfPayMultiplier,
+  relationsTickOf,
+  rentMultiplierFor,
+  rollBreakdowns,
+  vendorTickOf,
+  emrTierSpecOf,
+} from './expansion';
+import { createRng } from './rng';
 import { buildStatements, depreciateAll, serviceLoans } from './accounting';
 import { collectEvents } from './events';
 import { initialAddonStatuses, tickFee } from './fee';
@@ -57,7 +82,9 @@ import {
 import type {
   ClinicId,
   ClinicState,
+  ExternalRelationId,
   ClinicTick,
+  ExpansionTick,
   FixedAsset,
   GameState,
   IncomeStatement,
@@ -108,6 +135,21 @@ function initialState(scenario: Scenario): MutableState {
     retainedEarnings: 0,
     doctorPlan: Object.fromEntries(CLINICS.map((c) => [c.id, 0])),
     maintainIgyoku: true,
+
+    // 拡張系。ここが全部「空」であることが、検証済みの数字を守る条件
+    externalRelations: initialRelations(),
+    externalRelationActive: initialRelationActivity(),
+    emrTier: null,
+    emrMigrationEndsAtMonth: null,
+    aiTools: [],
+    equipment: [],
+    maintenanceContract: false,
+    pharmacyInvitedAt: {},
+    propertyOwnedSince: {},
+    executiveSalary: 0,
+    cumulativeExecutiveSalary: 0,
+    personalCash: 0,
+    personalAssets: [],
   };
 }
 
@@ -137,6 +179,8 @@ function clinicAssets(clinicId: ClinicId, month: number): FixedAsset[] {
 
 export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): SimulationRun {
   const state = initialState(scenario);
+  // 乱数は保守未加入の機器の故障判定にしか使わない。既定シナリオでは一度も引かれない
+  const rng = createRng(scenario.seed);
   const clinicNames = Object.fromEntries(CLINICS.map((c) => [c.id, c.name]));
   const months: MonthResult[] = [];
 
@@ -155,8 +199,10 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     }
     if (decision?.maintainIgyoku !== undefined) state.maintainIgyoku = decision.maintainIgyoku;
 
+    let openedClinicsThisMonth = 0;
     for (const config of CLINICS) {
       if (config.openMonth !== month) continue;
+      openedClinicsThisMonth++;
       capitalExpenditure += CLINIC_CAPEX;
       state.assets.push(...clinicAssets(config.id, month));
       newBorrowing += CLINIC_LOAN;
@@ -213,6 +259,123 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     if (decision?.agencyHires) {
       state.agencyHiresCumulative += decision.agencyHires;
       agencyFees += decision.agencyHires * AGENCY_FEE_PER_DOCTOR;
+    }
+
+    // ---- 拡張系の意思決定。既定シナリオは1つも書いていないので全て素通りする
+    if (decision?.relationActivity) {
+      for (const [id, on] of Object.entries(decision.relationActivity)) {
+        if (on !== undefined) state.externalRelationActive[id as ExternalRelationId] = on;
+      }
+    }
+
+    if (decision?.migrateEmr && decision.migrateEmr !== state.emrTier) {
+      const spec = emrTierSpecOf(decision.migrateEmr);
+      if (spec) {
+        const stock = state.clinics.reduce((sum, c) => sum + c.patientStock, 0);
+        const cost = migrationCostFor(decision.migrateEmr, stock);
+        capitalExpenditure += cost;
+        state.assets.push({
+          id: `emr-${decision.migrateEmr}-${month}`,
+          name: `電子カルテ ${spec.name}`,
+          assetClass: 'intangible',
+          acquiredAtMonth: month,
+          acquisitionCost: cost,
+          usefulLifeMonths: USEFUL_LIFE_INTERIOR,
+          bookValue: cost,
+        });
+        state.emrTier = decision.migrateEmr;
+        state.emrMigrationEndsAtMonth = month + spec.migrationPenaltyMonths;
+      }
+    }
+
+    for (const toolId of decision?.adoptAiTools ?? []) {
+      if (state.aiTools.includes(toolId)) continue;
+      const spec = AI_TOOLS.find((t) => t.id === toolId);
+      if (!spec) continue;
+      state.aiTools.push(toolId);
+      capitalExpenditure += spec.upfrontCost;
+      state.assets.push({
+        id: `ai-${toolId}`,
+        name: spec.name,
+        assetClass: 'intangible',
+        acquiredAtMonth: month,
+        acquisitionCost: spec.upfrontCost,
+        usefulLifeMonths: USEFUL_LIFE_EQUIPMENT,
+        bookValue: spec.upfrontCost,
+      });
+    }
+
+    for (const order of decision?.buyEquipment ?? []) {
+      if (state.equipment.some((e) => e.id === order.id)) continue;
+      const spec = EQUIPMENT_CATALOG.find((e) => e.id === order.id);
+      if (!spec) continue;
+      const leased = order.lease === true;
+      state.equipment.push({
+        id: spec.id,
+        leased,
+        acquiredAtMonth: month,
+        repairedAtMonth: null,
+      });
+      // リースは資産に載らない。毎月の費用として systemCost に出る
+      if (!leased) {
+        capitalExpenditure += spec.price;
+        state.assets.push({
+          id: `equipment-${spec.id}`,
+          name: spec.name,
+          assetClass: 'medicalEquipment',
+          acquiredAtMonth: month,
+          acquisitionCost: spec.price,
+          usefulLifeMonths: USEFUL_LIFE_EQUIPMENT,
+          bookValue: spec.price,
+        });
+      }
+    }
+
+    if (decision?.maintenanceContract !== undefined) {
+      state.maintenanceContract = decision.maintenanceContract;
+    }
+
+    for (const clinicId of decision?.invitePharmacy ?? []) {
+      if (state.pharmacyInvitedAt[clinicId] !== undefined) continue;
+      state.pharmacyInvitedAt[clinicId] = month;
+      capitalExpenditure += PHARMACY_INVITE_CAPEX;
+      state.assets.push({
+        id: `pharmacy-${clinicId}`,
+        name: `${clinicId}院 門前薬局 躯体負担`,
+        assetClass: 'building',
+        acquiredAtMonth: month,
+        acquisitionCost: PHARMACY_INVITE_CAPEX,
+        usefulLifeMonths: USEFUL_LIFE_BUILDING,
+        bookValue: PHARMACY_INVITE_CAPEX,
+      });
+    }
+
+    for (const clinicId of decision?.buyProperty ?? []) {
+      if (state.propertyOwnedSince[clinicId] !== undefined) continue;
+      state.propertyOwnedSince[clinicId] = month;
+      capitalExpenditure += PROPERTY_PRICE;
+      state.assets.push({
+        id: `property-${clinicId}`,
+        name: `${clinicId}院 物件`,
+        assetClass: 'building',
+        acquiredAtMonth: month,
+        acquisitionCost: PROPERTY_PRICE,
+        usefulLifeMonths: USEFUL_LIFE_BUILDING,
+        bookValue: PROPERTY_PRICE,
+      });
+    }
+
+    if (decision?.executiveSalary !== undefined) {
+      state.executiveSalary = Math.max(0, Math.min(EXECUTIVE_SALARY_MAX, decision.executiveSalary));
+    }
+
+    for (const assetId of decision?.buyPersonalAssets ?? []) {
+      if (state.personalAssets.includes(assetId)) continue;
+      const spec = PERSONAL_ASSETS.find((a) => a.id === assetId);
+      // 個人の現金で買う。足りなければ買えない。法人の現金は動かない
+      if (!spec || state.personalCash < spec.price) continue;
+      state.personalCash -= spec.price;
+      state.personalAssets.push(assetId);
     }
 
     // 関係値は維持費を払っていれば据え置き、払わなければ減衰する。上げるのは金ではない
@@ -273,6 +436,50 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     });
     state.addons = fee.addons;
 
+    // ------------------------------------------------ 3.5 拡張系の係数を確定する
+    //
+    // 診療所を tick する前に決めておく必要がある。当番医も在宅もカルテ移行も
+    // 「診察枠に効く」ので、枠を計算する前に係数として畳んでおく。
+    // 何も起こしていなければ、この節を通っても係数は全部 1 のまま。
+    state.externalRelations = advanceRelations({
+      current: state.externalRelations,
+      active: state.externalRelationActive,
+      openedClinics: openedClinicsThisMonth,
+      openingPenalty: MEDICAL_ASSOCIATION_OPENING_PENALTY,
+    });
+    const relations = relationsTickOf(state.externalRelations, state.externalRelationActive);
+
+    const breakdowns = rollBreakdowns({
+      equipment: state.equipment,
+      maintenanceContract: state.maintenanceContract,
+      month,
+      rng,
+    });
+    state.equipment = breakdowns.equipment;
+
+    const equipmentBookValue: Record<string, Man> = {};
+    for (const asset of state.assets) {
+      if (asset.id.startsWith('equipment-')) {
+        equipmentBookValue[asset.id.slice('equipment-'.length)] = asset.bookValue;
+      }
+    }
+    const vendor = vendorTickOf({
+      month,
+      emrTier: state.emrTier,
+      emrMigrationEndsAtMonth: state.emrMigrationEndsAtMonth,
+      equipment: state.equipment,
+      aiTools: state.aiTools,
+      maintenanceContract: state.maintenanceContract,
+      equipmentBookValue,
+    });
+
+    const capacityMultiplier =
+      relationCapacityMultiplier(relations, state.externalRelations.medicalAssociation) *
+      (1 - vendor.migrationCapacityPenalty);
+    const newPatientMultiplier = 1 + relations.referralUplift;
+    const selfPayMultiplier =
+      relationSelfPayMultiplier(relations) * (1 + vendor.equipmentSelfPayUplift);
+
     // ---------------------------------------------------------- 4. 診療所
     const clinicTicks: ClinicTick[] = [];
     let insuranceRevenue: Man = 0;
@@ -286,6 +493,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       const previous = state.clinics.find((c) => c.id === config.id);
       if (!previous) continue;
       const doctors = doctorsByClinic[config.id] ?? 0;
+      const rentMultiplier = rentMultiplierFor(state.propertyOwnedSince[config.id] !== undefined);
       const tick = tickClinic({
         config,
         month,
@@ -298,6 +506,11 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         nurseSufficiency,
         allocatedNurses: allocated[config.id] ?? 0,
         effectiveFeeIndex: fee.effectiveFeeIndex,
+        extraVisitsPerDoctorPerDay: vendor.extraVisitsPerDoctorPerDay,
+        capacityMultiplier,
+        newPatientMultiplier,
+        selfPayMultiplier,
+        rentMultiplier,
       });
       clinicTicks.push(tick);
 
@@ -319,7 +532,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         medicalSupplies += (tick.insuranceRevenue + tick.selfPayRevenue) * SUPPLIES_RATE;
         doctorPayroll += doctors * DOCTOR_COST_PER_MONTH;
         nursePayroll += (allocated[config.id] ?? 0) * NURSE_COST_PER_MONTH;
-        rent += CLINIC_FIXED_COST_PER_MONTH;
+        rent += CLINIC_FIXED_COST_PER_MONTH * rentMultiplier;
       }
     }
 
@@ -336,23 +549,74 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     const depreciated = depreciateAll(state.assets, month);
     state.assets = depreciated.assets;
 
+    // 拡張系の収支。誘致も取得もしていなければ全て 0
+    const pharmacy = pharmacyTickOf({
+      clinics: CLINICS.map((c) => {
+        const tick = clinicTicks.find((t) => t.id === c.id);
+        return {
+          id: c.id,
+          name: c.name,
+          patientStock: tick?.patientStock ?? 0,
+          open: month >= c.openMonth,
+        };
+      }),
+      invitedAt: state.pharmacyInvitedAt,
+    });
+
+    const propertyBookValue: Record<ClinicId, Man> = {};
+    for (const asset of state.assets) {
+      if (asset.id.startsWith('property-')) {
+        propertyBookValue[asset.id.slice('property-'.length)] = asset.bookValue;
+      }
+    }
+    const realEstate = realEstateTickOf({
+      clinics: CLINICS.map((c) => ({ id: c.id, name: c.name, open: month >= c.openMonth })),
+      ownedSince: state.propertyOwnedSince,
+      bookValueByClinic: propertyBookValue,
+    });
+
+    // 役員報酬は法人の費用であり、同額が個人へ移る。手取りは税を引いた分
+    const salary = state.executiveSalary;
+    state.cumulativeExecutiveSalary += salary;
+    state.personalCash += salary * (1 - PERSONAL_TAX_RATE);
+    const personal = personalTickOf({
+      salary,
+      cumulativeSalary: state.cumulativeExecutiveSalary,
+      cash: state.personalCash,
+      owned: state.personalAssets,
+    });
+
     const incomeLines: BuildLines = {
       insuranceRevenue,
       selfPayRevenue,
       tuitionRevenue,
-      rentalRevenue: 0,
+      rentalRevenue: pharmacy.rentalRevenue,
+      contractRevenue: relations.contractRevenue,
       medicalSupplies,
       doctorPayroll,
       nursePayroll,
-      otherPayroll: 0,
+      otherPayroll: salary,
       rent,
       depreciation: depreciated.depreciation,
       schoolOperating,
       agencyFees,
       igyokuRelationCost: state.maintainIgyoku ? IGYOKU_RELATION_COST_PER_MONTH : 0,
+      externalRelationCost: relations.totalCost,
+      systemCost: vendor.recurringCost,
       headquarters: HQ_COST_PER_MONTH,
       interestExpense: serviced.interest,
       extraordinaryLoss: 0,
+    };
+
+    const expansion: ExpansionTick = {
+      relations,
+      vendor,
+      pharmacy,
+      realEstate,
+      personal,
+      capacityMultiplier,
+      newPatientMultiplier,
+      selfPayMultiplier,
     };
 
     const financials = buildStatements({
@@ -398,6 +662,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       fee,
       financials,
       events,
+      expansion,
     });
   }
 

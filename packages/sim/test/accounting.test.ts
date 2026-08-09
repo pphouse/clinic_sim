@@ -119,6 +119,10 @@ describe('三表の組み立て', () => {
     headquarters: 250,
     interestExpense: 40,
     extraordinaryLoss: 0,
+    // 拡張系の行。この試験は検証済みの範囲だけを見るので 0 のまま
+    contractRevenue: 0,
+    externalRelationCost: 0,
+    systemCost: 0,
   };
 
   // 期首は 現金 10,000 ＋ 未収金 2,000 ＋ 固定資産 3,000 ＝ 純資産 15,000 で釣り合っている。

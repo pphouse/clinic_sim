@@ -13,7 +13,7 @@
  *   率を単純に 3 で割ると 3 ヶ月後に元より多く減る。ここを間違えると
  *   検証済みの挙動から静かにズレる。monthlyFromQuarterly() を必ず通すこと。
  */
-import type { Addon, ClinicConfig, FeeRevision } from './types';
+import type { Addon, ClinicConfig, EmrTier, ExternalRelationId, FeeRevision, Man } from './types';
 
 export const MONTHS_PER_YEAR = 12;
 export const MONTHS_PER_QUARTER = 3;
@@ -156,6 +156,169 @@ export const ADDONS: Addon[] = [
 ];
 
 // ==================================================================
+// ★ここから下は検証モデル（med_sim2.xlsx）に無い新規追加。
+//
+// **全て既定でオフ。** 既定シナリオは一切使わないので、
+// 追加しても baseline.golden.json / baseline.monthly.json の数字は動かない。
+// 検証済みの核を壊さずに系を足すための約束であり、破ってはいけない。
+//
+// ここの数値は**検証されていない**。表計算で確かめた値ではなく、
+// 「この方向に効く」という設計意図だけが根拠。調整の余地しかない。
+// ==================================================================
+
+// --- 外部関係（地域医師会・連携基幹病院・ケアマネ）
+//
+// 3つとも「毎月活動すると関係が育ち、やめると錆びる」という同じ形にした。
+// **効き先を変えることで別物にしている。** 形まで変えると覚えることが3倍になる。
+
+export interface ExternalRelationSpec {
+  id: ExternalRelationId;
+  name: string;
+  /** 活動を続けている月の費用 */
+  monthlyCost: Man;
+  /** 活動した月の上昇 */
+  gainPerMonth: number;
+  /** 活動しなかった月の低下 */
+  decayPerMonth: number;
+  max: number;
+  /** この関係が何に効くか。UI がそのまま出す */
+  effect: string;
+}
+
+export const EXTERNAL_RELATIONS: ExternalRelationSpec[] = [
+  {
+    id: 'medicalAssociation',
+    name: '地域医師会',
+    monthlyCost: 15,
+    gainPerMonth: 1.5,
+    decayPerMonth: 0.5,
+    max: 100,
+    effect: '休日当番医・学校医・自治体健診の受託。収入になるが診察枠を食う',
+  },
+  {
+    id: 'referralHospital',
+    name: '連携基幹病院',
+    monthlyCost: 25,
+    gainPerMonth: 1.2,
+    decayPerMonth: 0.6,
+    max: 100,
+    effect: '紹介患者。新規患者ポテンシャルが最大 +25%',
+  },
+  {
+    id: 'careManager',
+    name: 'ケアマネ・地域包括',
+    monthlyCost: 20,
+    gainPerMonth: 1.4,
+    decayPerMonth: 0.5,
+    max: 100,
+    effect: '在宅の紹介。単価は上がるが訪問で診察枠を食う',
+  },
+];
+
+/**
+ * ここを割ると受託が回ってこない水準。
+ * 「顔を出していない先生には当番を振らない」という閾値であって、
+ * 開院の可否ではない（開院を関係値で止めると、既定シナリオの開院月が動いて
+ * 検証済みの結果が壊れる）。
+ */
+export const MEDICAL_ASSOCIATION_CONTRACT_THRESHOLD = 50;
+/** 受託収入。関係値1あたり万円/月。関係100で 30万/月 */
+export const MEDICAL_ASSOCIATION_REVENUE_PER_POINT = 0.3;
+/** 当番医に出る分、自院の診察枠が落ちる。関係100で −8% */
+export const MEDICAL_ASSOCIATION_CAPACITY_DRAG = 0.08;
+/**
+ * 分院を開くと関係値が下がる。**拡大そのものが成長ブレーキになる。**
+ * 地域の同業者からすれば、チェーンの分院は競合の出店でしかない。
+ */
+export const MEDICAL_ASSOCIATION_OPENING_PENALTY = 8;
+/** 連携度100のときの新規患者の上乗せ */
+export const REFERRAL_MAX_UPLIFT = 0.25;
+/** ケアマネ関係100のときの在宅比率 */
+export const CARE_MANAGER_MAX_HOME_SHARE = 0.3;
+/** 在宅患者の自費単価の上乗せ（在宅比率にかかる） */
+export const HOME_CARE_SELF_PAY_UPLIFT = 1.2;
+/** 在宅は訪問に時間を食う。在宅比率あたり診察枠が落ちる率 */
+export const HOME_CARE_CAPACITY_DRAG = 0.25;
+
+// --- 門前薬局
+/** 誘致の一時金 */
+export const PHARMACY_INVITE_CAPEX = 1200;
+/** 定額の賃料 */
+export const PHARMACY_BASE_RENT = 60;
+/** 患者1人あたりの歩合賃料（万円/月） */
+export const PHARMACY_RENT_PER_PATIENT = 0.008;
+
+// --- 不動産（テナント→自社保有）
+/** 1院ぶんの物件価格 */
+export const PROPERTY_PRICE = 9000;
+/**
+ * 院の固定費のうち家賃が占める割合。
+ * 保有に切り替えるとこの分が消え、代わりに建物の減価償却が乗る。
+ */
+export const CLINIC_RENT_SHARE = 0.5;
+
+// --- 個人資産
+/** 役員報酬の上限（万円/月）。青天井にすると法人を空にできてしまう */
+export const EXECUTIVE_SALARY_MAX = 300;
+/** 役員報酬にかかる個人の税・社会保険。手取りはこの分だけ減る */
+export const PERSONAL_TAX_RATE = 0.45;
+
+export interface PersonalAssetSpec {
+  id: string;
+  name: string;
+  price: Man;
+  /** 見栄の点数。合計で称号が決まる */
+  prestige: number;
+  note: string;
+}
+
+/**
+ * 見栄レイヤー。**法人の数字には一切効かない。**
+ *
+ * 効かせたくなるが、効かせた瞬間に「クルーザーを買うと患者が増える」という
+ * 嘘の因果ができる。ここは進捗を測る物差しであって、意思決定ではない。
+ */
+export const PERSONAL_ASSETS: PersonalAssetSpec[] = [
+  { id: 'watch', name: '機械式時計', price: 300, prestige: 5, note: '学会で目に入る' },
+  { id: 'car', name: 'ドイツ車', price: 1200, prestige: 12, note: '駐車場に置く' },
+  { id: 'villa', name: '軽井沢の別荘', price: 8000, prestige: 30, note: '夏に行かない' },
+  { id: 'house', name: '都心のマンション', price: 12000, prestige: 40, note: '住む' },
+  { id: 'cruiser', name: 'クルーザー', price: 20000, prestige: 60, note: '維持費は聞かない' },
+];
+
+/** 見栄の点数から称号を引く表。上から順に見て、最初に届いたものを使う */
+export const PERSONAL_RANKS: { minPrestige: number; label: string }[] = [
+  { minPrestige: 100, label: '医療法人グループ総帥' },
+  { minPrestige: 60, label: '地域の名士' },
+  { minPrestige: 30, label: '開業医としては成功' },
+  { minPrestige: 10, label: '人並みの院長' },
+  { minPrestige: 0, label: '働きづめの勤務医' },
+];
+
+// --- 医療機器（システム・機器商社の1タブ目）
+export interface EquipmentSpec {
+  id: string;
+  name: string;
+  price: Man;
+  /** 自費診療収入への上乗せ率。故障中は失われる */
+  selfPayUplift: number;
+}
+
+/**
+ * 機器は診察枠を増やさない。**自費収入だけを増やす。**
+ * 枠を増やす手段（医師・AI）と効き先を分けておかないと、
+ * 「とりあえず全部買う」が最適解になって判断が消える。
+ */
+export const EQUIPMENT_CATALOG: EquipmentSpec[] = [
+  { id: 'xray', name: 'デジタルX線', price: 1200, selfPayUplift: 0.08 },
+  { id: 'endoscope', name: '内視鏡', price: 2400, selfPayUplift: 0.15 },
+  { id: 'ct', name: 'CT', price: 6000, selfPayUplift: 0.25 },
+];
+
+/** 保守未加入の機器が1ヶ月に壊れる確率 */
+export const BREAKDOWN_CHANCE_PER_MONTH = 0.02;
+
+// ==================================================================
 // 設備・システム（docs/spec/screens/vendor.md）
 // エクセルの検証モデルには無い。新規追加のため、ゴールデンテストの対象外。
 // 実装したら vendor.test.ts で個別に検証すること。
@@ -168,8 +331,6 @@ export const LEASE_TERM_MONTHS = 60;
 export const MAINTENANCE_RATE = 0.08;
 /** 保守未加入で故障したときの復旧までの月数 */
 export const BREAKDOWN_REPAIR_MONTHS = 6;
-
-export type EmrTier = 'single' | 'chain' | 'enterprise';
 
 export interface EmrTierSpec {
   id: EmrTier;

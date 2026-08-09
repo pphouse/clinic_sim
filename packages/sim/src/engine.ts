@@ -50,9 +50,14 @@ import type { ClinicConfig, ClinicTick, Man, Month } from './types';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** 医師数から決まる診察枠（月あたり） */
-export function capacityOf(doctors: number): number {
-  return doctors * VISITS_PER_DOCTOR_PER_DAY * CLINIC_DAYS_PER_MONTH;
+/**
+ * 医師数から決まる診察枠（月あたり）。
+ *
+ * extraVisitsPerDoctorPerDay は AI の上乗せ。**枠は増えるが施設基準の医師数には
+ * 数えない**（constants.ts の AI_TOOLS 参照）。既定は 0 なので検証済みの式のまま。
+ */
+export function capacityOf(doctors: number, extraVisitsPerDoctorPerDay = 0): number {
+  return doctors * (VISITS_PER_DOCTOR_PER_DAY + extraVisitsPerDoctorPerDay) * CLINIC_DAYS_PER_MONTH;
 }
 
 /**
@@ -115,6 +120,20 @@ export interface ClinicTickInput {
   allocatedNurses: number;
   /** 診療報酬の実効点数指数（基準 100） */
   effectiveFeeIndex: number;
+
+  // ---- ここから下は拡張系の修正項。**既定値は「何も起きない」。**
+  // 検証モデル（med_sim2.xlsx）には無い経路なので、省略時は式が元のまま残る。
+
+  /** 医師1人1日あたりの診察可能数への上乗せ（AI） */
+  extraVisitsPerDoctorPerDay?: number;
+  /** 診察枠に掛かる係数。当番医・在宅・カルテ移行で 1 を下回る */
+  capacityMultiplier?: number;
+  /** 新規患者に掛かる係数。基幹病院からの紹介で 1 を上回る */
+  newPatientMultiplier?: number;
+  /** 自費収入に掛かる係数。在宅・医療機器で 1 を上回る */
+  selfPayMultiplier?: number;
+  /** 固定費（家賃）に掛かる係数。物件を買うと 1 を下回る */
+  rentMultiplier?: number;
 }
 
 export function tickClinic(input: ClinicTickInput): ClinicTick {
@@ -137,11 +156,13 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   const isFirstMonth = month === config.openMonth;
   const openingStock = isFirstMonth ? config.initialPatientStock : input.previousStock;
 
-  const newPatients = newPatientsOf(config.newPatientPotential, input.laggedReputation);
+  const newPatients =
+    newPatientsOf(config.newPatientPotential, input.laggedReputation) *
+    (input.newPatientMultiplier ?? 1);
   const demandVisits = openingStock * VISITS_PER_PATIENT_PER_MONTH + newPatients;
 
-  const capacity = capacityOf(doctors);
-  const effectiveCapacity = capacity * nurseSufficiency;
+  const capacity = capacityOf(doctors, input.extraVisitsPerDoctorPerDay ?? 0);
+  const effectiveCapacity = capacity * nurseSufficiency * (input.capacityMultiplier ?? 1);
   const utilization = effectiveCapacity === 0 ? 0 : demandVisits / effectiveCapacity;
   const waitMinutes = effectiveCapacity === 0 ? 0 : waitMinutesOf(utilization);
 
@@ -154,7 +175,8 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
 
   const insuranceRevenue: Man =
     (visitsServed * POINTS_PER_VISIT * YEN_PER_POINT * (effectiveFeeIndex / 100)) / YEN_PER_MAN;
-  const selfPayRevenue: Man = (patientStock * SELF_PAY_YEN_PER_PATIENT) / YEN_PER_MAN;
+  const selfPayRevenue: Man =
+    ((patientStock * SELF_PAY_YEN_PER_PATIENT) / YEN_PER_MAN) * (input.selfPayMultiplier ?? 1);
 
   const operatingCost: Man =
     doctors === 0
@@ -162,7 +184,7 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
       : (insuranceRevenue + selfPayRevenue) * SUPPLIES_RATE +
         doctors * DOCTOR_COST_PER_MONTH +
         allocatedNurses * NURSE_COST_PER_MONTH +
-        CLINIC_FIXED_COST_PER_MONTH;
+        CLINIC_FIXED_COST_PER_MONTH * (input.rentMultiplier ?? 1);
 
   return {
     id,

@@ -8,4 +8,5 @@ export * from './events';
 export * from './scenario';
 export * from './simulation';
 export * from './accounting';
+export * from './expansion';
 export * from './derive';
