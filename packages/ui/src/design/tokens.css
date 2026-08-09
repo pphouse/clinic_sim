@@ -1,0 +1,103 @@
+/*
+ * デザイントークン。
+ *
+ * 方向性：暗い墨紺のUIクロームの上に、明るいアイソメイラストを1枚置く。
+ * Coffee Inc の構造を踏襲しつつ、色は日本の医療の質感から取っている。
+ *
+ * 署名要素は「レセプト罫線」。日本のレセプト用紙の淡い緑の罫線を、
+ * 全ての数値テーブルの区切り線として使う。これがこのゲームの見た目の指紋になる。
+ *
+ * 書体：
+ *   見出し = Zen Old Mincho。明朝を選んだのは、厚労省通知・医局の掲示・
+ *            学会抄録といった、このゲームの世界の文書が全部明朝だから。
+ *            ゴシックにすると SaaS のダッシュボードに見える。
+ *   UI    = Zen Kaku Gothic New
+ *   数値  = Inter（tabular-nums 必須。桁が揃わないと財務諸表が読めない）
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* --- 基層。墨に僅かに紺を入れた無彩色 */
+  --ink-900: #0e1419;  /* 画面の底 */
+  --ink-800: #161e26;  /* サーフェス */
+  --ink-700: #1f2a34;  /* 一段持ち上げた面 */
+  --ink-600: #2a3843;  /* 境界 */
+
+  /* --- 文字。純白ではなく白衣とレセプト用紙の緑がかった白 */
+  --paper:      #e8ede9;
+  --paper-dim:  #9aa8a5;
+  --paper-mute: #64726f;
+
+  /* --- 署名：レセプト罫線 */
+  --rule:        #23343a;
+  --rule-accent: #35564f;
+
+  /* --- 状態 */
+  --positive: #4fa97a;
+  --negative: #d4645c;
+  --warning:  #e0a63c;
+  --critical: #c4566e;
+
+  /* --- 領域色。訪問する建物ごとに面の色と差し色が変わる */
+  --hq-surface:       #131c24;  --hq-accent:       #6e8ca0;
+  --igyoku-surface:   #14203a;  --igyoku-accent:   #5b8def;  /* 医局＝藍。大学の重さ */
+  --agency-surface:   #241c10;  --agency-accent:   #e0a63c;  /* 紹介会社＝琥珀。金の匂い */
+  --shikai-surface:   #241320;  --shikai-accent:   #c4566e;  /* 医師会＝臙脂 */
+  --hospital-surface: #10262a;  --hospital-accent: #3fb6a8;  /* 基幹病院＝青緑 */
+  --bureau-surface:   #241a1a;  --bureau-accent:   #b4635a;  /* 厚生局＝灰赤。監査の緊張 */
+  --bank-surface:     #10231a;  --bank-accent:     #4fa97a;
+  --pharmacy-surface: #16241c;  --pharmacy-accent: #7cc08a;
+  --school-surface:   #1a1d2c;  --school-accent:   #8b8ce0;
+
+  /* --- 書体 */
+  --font-display: 'Zen Old Mincho', serif;
+  --font-ui:      'Zen Kaku Gothic New', sans-serif;
+  --font-num:     'Inter', system-ui, sans-serif;
+
+  /* --- 型スケール。モバイル縦持ち 390px 基準 */
+  --text-hero:    32px;  /* 財務諸表の総額 */
+  --text-title:   20px;
+  --text-body:    15px;
+  --text-label:   13px;
+  --text-caption: 11px;
+
+  /* --- 余白。4の倍数のみ */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+
+  /* --- モバイルの安全域 */
+  --tabbar-height: 64px;
+  --header-height: 56px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 数値は必ず等幅数字で。桁がズレると財務諸表が読めない */
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* 署名要素：レセプト罫線。数値テーブルの行区切りに使う */
+.receipt-rule {
+  border-bottom: 1px solid var(--rule);
+}
+.receipt-rule--total {
+  border-bottom: 2px solid var(--rule-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
