@@ -1,0 +1,33 @@
+/*
+ * 最低限のリセット。トークンは tokens.css。
+ * 縦持ち固定・全画面差し替えという前提なので、スクロールは main の中だけで起きる。
+ */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink-900);
+  color: var(--paper);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* 数値の増減が目で追えるように。減速する動きは使わない */
+@keyframes value-flash {
+  from {
+    background: var(--rule-accent);
+  }
+  to {
+    background: transparent;
+  }
+}

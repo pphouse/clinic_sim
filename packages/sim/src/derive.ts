@@ -4,7 +4,7 @@
  * 同じ集計が複数画面に散ると必ずどこかがズレるので、
  * 「複数画面で使う数字」は例外なくこのファイルに置く。
  */
-import type { ClinicTick, Man, Quarter, QuarterResult } from './types';
+import type { ClinicTick, GameEvent, Man, Quarter, QuarterResult, ScreenId } from './types';
 
 export interface GroupTotals {
   /** 診療収入（保険＋自費）。学費・賃料は含まない */
@@ -54,6 +54,19 @@ export function deriveGroupTotals(result: QuarterResult): GroupTotals {
 /** 全社の通院患者ストック。このゲームの実体資産 */
 export function totalPatientStock(result: QuarterResult): number {
   return result.clinics.reduce((sum, c) => sum + c.patientStock, 0);
+}
+
+/**
+ * 捌けなかった診察。翌期に繰り越さず、そのまま消える。
+ * 診療所画面が引き算で出していたので sim 側に移した（docs/spec/screens/clinic.md）。
+ */
+export function unservedVisits(tick: ClinicTick): number {
+  return Math.max(0, tick.demandVisits - tick.visitsServed);
+}
+
+/** その画面に出すべき通知だけを拾う。UI はこれを数えてバッジにする */
+export function eventsForScreen(result: QuarterResult, screen: ScreenId): GameEvent[] {
+  return result.events.filter((e) => e.screen === screen);
 }
 
 /** いちばん詰まっている院。マップ画面のバッジはこれで決める */
