@@ -32,28 +32,21 @@ const page = await context.newPage();
 const beat = (ms = 1100) => page.waitForTimeout(ms);
 const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
 
-/** 表示中の四半期ラベル。テストの主張はこれを基準にする */
-const quarterLabel = () => page.getByTestId('quarter-label').innerText();
-const doctorCount = () => page.getByTestId('doctor-count').innerText();
-const heroValue = async (label) =>
-  page.locator('div', { hasText: new RegExp(`^${label}$`) }).first().isVisible();
+/**
+ * 表示中の四半期。画面のラベルは月表記なので、位置合わせは data-quarter で行う。
+ * 表示文字列で待ち合わせると、文言を変えるたびにツアーが壊れる。
+ */
+const currentQuarter = async () =>
+  Number(await page.getByTestId('quarter-label').getAttribute('data-quarter'));
 
-async function advanceTo(targetLabel) {
+async function goToQuarter(target) {
   for (let i = 0; i < 45; i++) {
-    if ((await quarterLabel()) === targetLabel) return;
-    await page.getByLabel('次の四半期へ').click();
+    const now = await currentQuarter();
+    if (now === target) return;
+    await page.getByLabel(now < target ? '次の期へ' : '前の期へ').click();
     await page.waitForTimeout(220);
   }
-  throw new Error(`${targetLabel} まで進めなかった`);
-}
-
-async function rewindTo(targetLabel) {
-  for (let i = 0; i < 45; i++) {
-    if ((await quarterLabel()) === targetLabel) return;
-    await page.getByLabel('前の四半期へ').click();
-    await page.waitForTimeout(220);
-  }
-  throw new Error(`${targetLabel} まで戻れなかった`);
+  throw new Error(`Q${target} まで移動できなかった`);
 }
 
 await page.goto(BASE);
@@ -62,17 +55,17 @@ await beat(1600);
 await shot('01-y1q1-overview');
 
 // --- 平常時。待ち時間15分、評判75
-await advanceTo('Y1Q4');
+await goToQuarter(4);
 await beat(1200);
 await shot('02-y1q4-overview');
 
 // --- Q5 に常勤医が1名抜ける。待ち時間が跳ねる
-await advanceTo('Y2Q1');
+await goToQuarter(5);
 await beat(1500);
 await shot('03-y2q1-doctor-lost');
 
 // --- Q7 が待ち時間のピーク。53分
-await advanceTo('Y2Q3');
+await goToQuarter(7);
 await beat(1800);
 await shot('04-y2q3-wait-peak');
 
@@ -81,7 +74,7 @@ await beat(1800);
 await shot('05-y2q3-patients');
 
 // --- 患者ストックの底は Q11。ピークから4四半期おくれてやってくる
-await advanceTo('Y3Q3');
+await goToQuarter(11);
 await beat(1800);
 await shot('06-y3q3-stock-trough');
 
@@ -91,17 +84,17 @@ await shot('07-y3q3-income');
 
 // --- ここから「もし Q5 に医師を戻していたら」を同じ画面で比べる
 await page.getByRole('button', { name: '概要' }).click();
-await rewindTo('Y2Q1');
+await goToQuarter(5);
 await beat(1400);
 await page.getByLabel('常勤医を増やす').click();
 await beat(1800);
 await shot('08-y2q1-doctor-restored');
 
-await advanceTo('Y2Q3');
+await goToQuarter(7);
 await beat(1800);
 await shot('09-y2q3-after-fix');
 
-await advanceTo('Y3Q3');
+await goToQuarter(11);
 await beat(1600);
 await shot('10-y3q3-after-fix');
 

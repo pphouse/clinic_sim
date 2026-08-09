@@ -13,6 +13,7 @@ import {
   REPUTATION_MIN,
   TOLERABLE_WAIT_MINUTES,
   eventsForScreen,
+  quarterMonthsLabel,
   unservedVisits,
   type ClinicId,
   type QuarterResult,
@@ -104,7 +105,7 @@ function greetingFor(waitMinutes: number, reputation: number, doctors: number): 
     return `評判が下限です。待ち時間は${minutes(waitMinutes)}分。ここから戻すのに何年かかるか、ご承知おきください。`;
   }
   if (waitMinutes >= CRITICAL_WAIT_MINUTES) {
-    return `待ち時間${minutes(waitMinutes)}分。もう評判は落ちています。患者が減り始めるのは数四半期あとです。`;
+    return `待ち時間${minutes(waitMinutes)}分。もう評判は落ちています。患者が減り始めるのは1年ほどあとです。`;
   }
   if (waitMinutes > TOLERABLE_WAIT_MINUTES) {
     return `待ち時間が${minutes(waitMinutes)}分です。許容の${TOLERABLE_WAIT_MINUTES}分を超えました。評判が削られ始めています。`;
@@ -138,7 +139,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
     <ScreenShell
       domain="hq"
       title={props.clinicName}
-      subtitle={`${result.label}　東京都文京区本郷`}
+      subtitle={`${quarterMonthsLabel(result.quarter)}　東京都文京区本郷`}
       icon={<ClinicIcon />}
       illustration={<ClinicIllustration crowding={clinic.utilization} />}
       portrait={<ManagerPortrait />}
@@ -154,7 +155,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
     >
       {!opened ? (
         <p style={{ color: 'var(--paper-dim)', fontSize: 'var(--text-body)' }}>
-          開院予定の四半期まで進めてください。
+          開院予定の期まで進めてください。
         </p>
       ) : (
         <>
@@ -211,7 +212,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
 
               {events.length > 0 && (
                 <>
-                  <SectionTitle>この四半期の通知</SectionTitle>
+                  <SectionTitle>この期の通知</SectionTitle>
                   {events.map((e) => (
                     <div
                       key={e.id}
@@ -264,7 +265,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
                   lineHeight: 1.6,
                 }}
               >
-                新規患者は<strong>前四半期の</strong>評判で決まる。ここが遅延の源泉。
+                新規患者は<strong>前の期の</strong>評判で決まる。ここが遅延の源泉。
               </p>
 
               <SectionTitle>捌けた診察</SectionTitle>
@@ -410,18 +411,18 @@ function ControlDock(
         }}
       >
         <StepButton
-          label="前の四半期へ"
+          label="前の期へ"
           glyph="◀"
           disabled={!props.canGoBack}
           onClick={() => props.onQuarterChange(-1)}
         />
         <div style={{ textAlign: 'center' }}>
           <div
-            className="num"
             data-testid="quarter-label"
-            style={{ fontSize: 'var(--text-body)', fontWeight: 600 }}
+            data-quarter={props.result.quarter}
+            style={{ fontSize: 'var(--text-body)', fontWeight: 600, whiteSpace: 'nowrap' }}
           >
-            {props.result.label}
+            {quarterMonthsLabel(props.result.quarter)}
           </div>
           {props.modified && (
             <button
@@ -443,7 +444,7 @@ function ControlDock(
           )}
         </div>
         <StepButton
-          label="次の四半期へ"
+          label="次の期へ"
           glyph="▶"
           disabled={!props.canGoForward}
           onClick={() => props.onQuarterChange(1)}

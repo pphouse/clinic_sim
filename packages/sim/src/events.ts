@@ -44,7 +44,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
         severity: 'critical',
         screen: 'clinic',
         title: `${name}：待ち時間 ${clinic.waitMinutes.toFixed(0)} 分`,
-        body: '診察枠が需要に追いついていない。評判はすでに削られている。患者ストックへ効いてくるのは数四半期あと。',
+        body: '診察枠が需要に追いついていない。評判はすでに削られている。患者ストックへ効いてくるのは1年ほどあと。',
       });
     } else if (clinic.waitMinutes > TOLERABLE_WAIT_MINUTES) {
       push({
@@ -61,7 +61,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
         severity: 'critical',
         screen: 'clinic',
         title: `${name}：評判が下限に張り付いた`,
-        body: '回帰は 1 四半期あたり 15% しか進まない。ここから戻すには数年かかる。',
+        body: '回帰は3か月あたり 15% しか進まない。ここから戻すには数年かかる。',
       });
     }
   }
@@ -73,7 +73,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
       severity: input.staff.nurseSufficiency < 0.9 ? 'critical' : 'warning',
       screen: 'personnel',
       title: `看護師充足率 ${(input.staff.nurseSufficiency * 100).toFixed(1)}%`,
-      body: '充足率がそのまま診察枠に掛かる。市場からは四半期 1.2 人しか採れない。',
+      body: '充足率がそのまま診察枠に掛かる。市場からは3か月で 1.2 人しか採れない。',
     });
   }
   if (input.staff.doctorShortfall) {
@@ -91,7 +91,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
       severity: 'info',
       screen: 'nursingSchool',
       title: `自校の卒業生 ${input.graduatedNurses.toFixed(1)} 名が入職`,
-      body: '卒業生の 35% しか残らない。それでも市場採用の 3 四半期分にあたる。',
+      body: '卒業生の 35% しか残らない。それでも市場採用の2年半ぶんにあたる。',
     });
   }
 

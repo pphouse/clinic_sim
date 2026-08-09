@@ -163,8 +163,35 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   };
 }
 
+/**
+ * 内部用のラベル。golden JSON の label 列と一致させる必要があるので変えない。
+ * **画面には出さない。** 表示は quarterMonthsLabel() を使う。
+ */
 export function quarterLabel(q: Quarter): string {
   const year = Math.floor((q - 1) / 4) + 1;
   const quarter = ((q - 1) % 4) + 1;
   return `Y${year}Q${quarter}`;
+}
+
+/** 年度内の何期目か（1〜4） */
+export function quarterOfYear(q: Quarter): number {
+  return ((q - 1) % 4) + 1;
+}
+
+/** 開院からの年度（1 始まり） */
+export function fiscalYearOf(q: Quarter): number {
+  return Math.floor((q - 1) / 4) + 1;
+}
+
+/**
+ * 画面に出すラベル。「Y2Q3」は病院の現場語彙ではないので月で言う。
+ *
+ * 年度は 4 月始まり。これは恣意的な選択ではなく、
+ * 診療報酬改定が偶数年の 4 月に施行されることに合わせている。
+ * 既定シナリオの改定は Q5・Q13・Q21・Q29・Q37＝2年おきの第1四半期に来るので、
+ * Q1 を 4〜6月 と置くと改定が全て 4 月に落ちる。
+ */
+export function quarterMonthsLabel(q: Quarter): string {
+  const months = ['4〜6月', '7〜9月', '10〜12月', '1〜3月'];
+  return `${fiscalYearOf(q)}年目 ${months[quarterOfYear(q) - 1]}`;
 }

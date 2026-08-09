@@ -12,7 +12,8 @@ import { describe, expect, it } from 'vitest';
 import golden from './golden/baseline.golden.json';
 import { assertBalanced } from '../src/accounting';
 import { addonLapseQuarters, deriveGroupTotals } from '../src/derive';
-import { INITIAL_CASH } from '../src/constants';
+import { FEE_REVISIONS, INITIAL_CASH } from '../src/constants';
+import { quarterMonthsLabel } from '../src/engine';
 import { BASELINE_SCENARIO } from '../src/scenario';
 import { runSimulation } from '../src/simulation';
 
@@ -36,6 +37,19 @@ describe('40四半期が最後まで回る', () => {
     expect(run.quarters).toHaveLength(BASELINE_SCENARIO.totalQuarters);
     expect(run.quarters[0]!.label).toBe('Y1Q1');
     expect(run.quarters[39]!.label).toBe('Y10Q4');
+  });
+
+  it('画面に出すラベルは月表記。年度は4月始まりで、改定は必ず4月に来る', () => {
+    expect(quarterMonthsLabel(1)).toBe('1年目 4〜6月');
+    expect(quarterMonthsLabel(7)).toBe('2年目 10〜12月');
+    expect(quarterMonthsLabel(40)).toBe('10年目 1〜3月');
+    // 既定シナリオの改定は全て年度の第1四半期＝4月に施行される
+    for (const revision of FEE_REVISIONS) {
+      expect(
+        quarterMonthsLabel(revision.effectiveQuarter),
+        `${revision.name} の施行月`,
+      ).toContain('4〜6月');
+    }
   });
 
   it('同じシナリオを2回回すと完全に同じ結果になる（決定性）', () => {
