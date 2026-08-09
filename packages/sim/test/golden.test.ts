@@ -19,8 +19,11 @@ describe('中核エンジンの単体挙動', () => {
   });
 
   it('稼働率が1を超えると待ち時間が急伸する', () => {
-    expect(waitMinutesOf(1.41)).toBeCloseTo(35.2, 1);
-    expect(waitMinutesOf(1.66)).toBeCloseTo(53.2, 1);
+    // 既定シナリオ Q5・Q7 の稼働率と待ち時間（golden の記録値をそのまま使う）。
+    // 稼働率は 2.5 乗で効くので、入力を小数2桁に丸めると出力が 0.2 分ずれる。
+    // 丸めた入力に丸めた期待値を突き合わせない。
+    expect(waitMinutesOf(1.4069)).toBeCloseTo(35.22, 1);
+    expect(waitMinutesOf(1.6592)).toBeCloseTo(53.19, 1);
   });
 
   it('評判は落ちるのが速く、戻るのが遅い（非対称性）', () => {
@@ -50,13 +53,13 @@ describe('ゴールデン：診療所の四半期tick', () => {
   for (const clinicId of ['A', 'B', 'C'] as const) {
     it(`${clinicId}院の40四半期がエクセルと一致する`, () => {
       for (let i = 0; i < quarters.length; i++) {
-        const q = quarters[i];
+        const q = quarters[i]!;
         const expected = q.clinics[clinicId];
         if (expected.capacity === 0) continue; // 未開院
 
-        const prev = i === 0 ? null : quarters[i - 1].clinics[clinicId];
+        const prev = i === 0 ? null : quarters[i - 1]!.clinics[clinicId];
         const actual = tickClinic({
-          config: configById[clinicId],
+          config: configById[clinicId]!,
           quarter: q.q,
           previousStock: prev ? prev.patientStock : 0,
           previousReputation: prev && prev.reputation ? prev.reputation : 75,
@@ -79,17 +82,17 @@ describe('検証済みの設計上の性質（回帰防止）', () => {
   const a = quarters.map((q) => q.clinics.A);
 
   it('待ち時間のピークはQ7、患者ストックの底はQ11。遅延は4四半期', () => {
-    const peakWaitQ = a.reduce((best, c, i) => (c.waitMinutes > a[best].waitMinutes ? i : best), 0) + 1;
+    const peakWaitQ = a.reduce((best, c, i) => (c.waitMinutes > a[best]!.waitMinutes ? i : best), 0) + 1;
     const window = a.slice(4, 20);
-    const troughQ = window.reduce((best, c, i) => (c.patientStock < window[best].patientStock ? i : best), 0) + 5;
+    const troughQ = window.reduce((best, c, i) => (c.patientStock < window[best]!.patientStock ? i : best), 0) + 5;
     expect(peakWaitQ).toBe(7);
     expect(troughQ).toBe(11);
     expect(troughQ - peakWaitQ).toBe(4);
   });
 
   it('4四半期の医師不足は20四半期経っても完全には回復しない', () => {
-    const beforeCrisis = a[3].patientStock;  // Q4
-    const longAfter = a[23].patientStock;    // Q24
+    const beforeCrisis = a[3]!.patientStock;  // Q4
+    const longAfter = a[23]!.patientStock;    // Q24
     expect(longAfter).toBeLessThan(beforeCrisis);
   });
 });
