@@ -378,8 +378,12 @@ export interface PropertyView {
   ownedSinceMonth: Month | null;
   price: Man;
   bookValue: Man;
-  /** 保有に切り替えて消えた家賃（万円/月） */
+  /** 保有に切り替えて消えた家賃（万円/月）。テナントのままなら 0 */
   rentSaved: Man;
+  /** 買ったら消える家賃（万円/月）。買う前に回収年数を出すために要る */
+  rentIfOwned: Man;
+  /** 単純な回収年数。物件価格 ÷ 年間の家賃 */
+  paybackYears: number;
 }
 
 export interface RealEstateTick {

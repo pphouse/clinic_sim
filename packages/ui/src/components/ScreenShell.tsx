@@ -23,7 +23,7 @@ import { CloseIcon } from './icons';
 /** tokens.css の領域色に対応 */
 export type Domain =
   | 'hq' | 'igyoku' | 'agency' | 'shikai'
-  | 'hospital' | 'bureau' | 'bank' | 'pharmacy' | 'school';
+  | 'hospital' | 'bureau' | 'bank' | 'pharmacy' | 'school' | 'vendor';
 
 export interface ShellTab {
   id: string;

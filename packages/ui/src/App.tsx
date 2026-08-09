@@ -43,8 +43,14 @@ export function App() {
   const changeMonth = (delta: number) =>
     setMonth((m) => Math.min(run.months.length, Math.max(1, m + delta)));
 
-  /** 表示中の月の医師配置を書き換える。以後の月にも効く（意思決定は据え置きが既定） */
-  function setDoctors(clinicId: ClinicId, next: number) {
+  /**
+   * 表示中の月の意思決定を書き換える。以後の月にも効く（意思決定は据え置きが既定）。
+   *
+   * その月に既に意思決定があれば上書き、無ければ挿して月順に並べ直す。
+   * **差分更新はしない。** シム核は純粋関数なので、押した瞬間に120ヶ月を丸ごと
+   * 計算し直すのが正しい（そうしないと「1年後」が古いままになる）。
+   */
+  function applyDecision(patch: Partial<MonthDecision>) {
     setDecisions((current) => {
       const index = current.findIndex((d) => d.month === month);
       if (index >= 0) {
@@ -52,15 +58,19 @@ export function App() {
         const target = current[index]!;
         updated[index] = {
           ...target,
-          doctorsByClinic: { ...target.doctorsByClinic, [clinicId]: next },
+          ...patch,
+          // 医師配置と外部関係は「書いた分だけ」上書きする。丸ごと置き換えない
+          doctorsByClinic: { ...target.doctorsByClinic, ...patch.doctorsByClinic },
+          relationActivity: { ...target.relationActivity, ...patch.relationActivity },
         };
         return updated;
       }
-      return [...current, { month, doctorsByClinic: { [clinicId]: next } }].sort(
-        (a, b) => a.month - b.month,
-      );
+      return [...current, { month, ...patch }].sort((a, b) => a.month - b.month);
     });
   }
+
+  const setDoctors = (clinicId: ClinicId, next: number) =>
+    applyDecision({ doctorsByClinic: { [clinicId]: next } });
 
   if (openBuilding !== null) {
     return (
@@ -70,6 +80,7 @@ export function App() {
         previous={previous}
         history={run.months}
         onClose={() => setOpenBuilding(null)}
+        onDecision={applyDecision}
       />
     );
   }

@@ -321,6 +321,15 @@ describe('不動産', () => {
     expect(years).toBeCloseTo(PROPERTY_PRICE / (CLINIC_FIXED_COST_PER_MONTH * CLINIC_RENT_SHARE * 12), 6);
     expect(propertyPaybackYears(0)).toBeNull();
   });
+
+  it('回収年数は買う前から出る。買った後にしか見えないのでは判断に使えない', () => {
+    const before = at(baseline, 30).expansion.realEstate.properties[0]!;
+    expect(before.owned).toBe(false);
+    expect(before.rentSaved).toBe(0);
+    expect(before.rentIfOwned).toBeCloseTo(CLINIC_FIXED_COST_PER_MONTH * CLINIC_RENT_SHARE, 9);
+    expect(before.paybackYears).toBeCloseTo(
+      PROPERTY_PRICE / (before.rentIfOwned * 12), 6);
+  });
 });
 
 // ==================================================================

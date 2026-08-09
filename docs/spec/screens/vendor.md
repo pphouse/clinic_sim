@@ -1,9 +1,12 @@
 # 画面仕様：システム・機器商社
 
-> ステータス: **未着手**
-> 担当ブランチ: `feature/screen-vendor`
+> ステータス: **実装済み**
 > ScreenId: `vendor`
 > 領域色: `vendor`（鋼青 / steel）
+
+> ★実装との差異：仕様は四半期刻みで書かれていた。**シムの刻みは1ヶ月**なので、
+> 「−20% × 2Q」は −20% × 6ヶ月、「4 四半期後」は12ヶ月後として実装してある。
+> 数値の意図は変えていない。
 
 ## この画面の唯一の仕事
 
@@ -49,10 +52,15 @@
 
 | 表示名 | sim のフィールド | 書式 |
 |---|---|---|
-| 保有機器 | `state.assets`（assetClass = medicalEquipment） | 一覧 |
-| 簿価 | `FixedAsset.bookValue` | 万円 |
-| 残存耐用 | `usefulLifeQuarters - 経過` | 四半期 |
-| リース料合計 | `incomeStatement.leaseExpense` | 万円/四半期 |
+| 保有機器 | `expansion.vendor.equipment[]` | 一覧 |
+| 簿価 | `EquipmentView.bookValue`（リースは 0） | 万円 |
+| リース料＋保守料 | `expansion.vendor.leaseExpense` / `recurringCost` | 万円/月 |
+| 自費の上乗せ | `expansion.vendor.equipmentSelfPayUplift` | +% |
+| 故障中 | `EquipmentView.broken` | 札 |
+
+★実装上の判断：**機器は診察枠を増やさず、自費収入だけを増やす。**
+枠を増やす手段（医師・AI）と効き先を分けないと「とりあえず全部買う」が
+最適解になって判断が消える。保守を切って故障すると、この上乗せを 6 ヶ月失う。
 
 ---
 
@@ -93,10 +101,14 @@
 
 | 表示名 | sim のフィールド | 書式 |
 |---|---|---|
-| 現在のティア | `state.emrTier` | ラベル |
-| 移行した場合の費用 | `deriveEmrMigrationCost(state)` | 万円 |
-| 移行した場合の枠低下 | ティア定義 | % × 四半期 |
-| 移行を1年遅らせた場合の費用 | 同上（患者数の予測込み） | 万円 |
+| 現在のティア | `expansion.vendor.emrTierName`（既定は「紙カルテ」） | ラベル |
+| 移行した場合の費用 | `emrMigrationOutlook(history, month)[].costNow` | 万円 |
+| 移行した場合の枠低下 | `.capacityPenalty` × `.penaltyMonths` | % × ヶ月 |
+| 移行を1年遅らせた場合の費用 | `.costIn12Months` | 万円 |
+| 待つことの代償 | `.costOfWaiting` | 万円 |
+
+12ヶ月後の患者数は直近12ヶ月の実績から線形で伸ばす。
+**予測を凝ってもゲームの判断は変わらないし、外れたときに嘘をついたことになる。**
 
 最後の行が重要。**待つことのコストを明示する。**
 
@@ -145,3 +157,9 @@ AIは医師を雇うより安く回転を上げられる。**だが加算は取�
 - 保守契約の切れる機器がある（warning）
 - 機器の故障で加算が失効した（critical）
 - 分院追加により現行カルテのライセンス上限に達した（warning）
+
+## 実装の状態
+
+3タブとも実装済み。`packages/sim/test/expansion.test.ts` に
+「AI は枠を増やすが施設基準の医師数には数えない」「保守に入っていれば故障しない」
+「待つほど高くつく」を試験として固定してある。

@@ -27,9 +27,11 @@ import {
   schoolStatus,
   totalDebt,
   totalPatientStock,
+  type MonthDecision,
   type MonthResult,
   type ScreenId,
 } from '@med/sim';
+import { PARTNER_BODIES } from './PartnerScreens';
 import { HeroRow, HeroStat, Note, SectionTitle, StatusPill } from '../../components/Section';
 import { ScreenShell, type ShellTab } from '../../components/ScreenShell';
 import { StatRow } from '../../components/StatRow';
@@ -43,21 +45,27 @@ export interface BuildingScreenProps {
   previous: MonthResult | null;
   history: MonthResult[];
   onClose: () => void;
+  /**
+   * 表示中の月の意思決定を書き換える。以後の月にも効く（意思決定は据え置きが既定）。
+   * 読み専用の画面（本社・経理など）は使わない。
+   */
+  onDecision?: (patch: Partial<MonthDecision>) => void;
 }
 
 /** 建物画面の入口。ScreenShell を被せて中身を差し込む */
 export function BuildingScreen(props: BuildingScreenProps) {
   const meta = buildingOf(props.screen);
   if (!meta) return null;
-  const body = BODIES[props.screen];
+  const body = BODIES[props.screen] ?? PARTNER_BODIES[props.screen];
   if (!body) return null;
-  const { greeting, tabs, render } = body(props);
+  const { greeting, tabs, render, dock } = body(props);
 
   return (
     <ScreenShellWithTabs
       meta={meta}
       greeting={greeting}
       tabs={tabs}
+      dock={dock}
       onClose={props.onClose}
       render={render}
       screen={props.screen}
@@ -70,6 +78,7 @@ function ScreenShellWithTabs({
   meta,
   greeting,
   tabs,
+  dock,
   onClose,
   render,
   screen,
@@ -78,6 +87,7 @@ function ScreenShellWithTabs({
   meta: NonNullable<ReturnType<typeof buildingOf>>;
   greeting: string;
   tabs: ShellTab[] | undefined;
+  dock: ReactNode | ((tab: string) => ReactNode);
   onClose: () => void;
   render: (activeTab: string) => ReactNode;
   screen: ScreenId;
@@ -96,6 +106,7 @@ function ScreenShellWithTabs({
       tabs={tabs}
       activeTabId={tab}
       onTabChange={setTab}
+      dock={typeof dock === 'function' ? dock(tab) : dock}
       onClose={onClose}
     >
       {render(tab)}
@@ -131,9 +142,14 @@ function ScreenShellWithTabs({
   );
 }
 
-interface Body {
+export interface Body {
   greeting: string;
   tabs?: ShellTab[];
+  /**
+   * 操作卓。ScreenShell が下タブのすぐ上へ固定で置く。
+   * タブごとに操作が変わる画面（商社）は関数で渡す。
+   */
+  dock?: ReactNode | ((tab: string) => ReactNode);
   render: (tab: string) => ReactNode;
 }
 

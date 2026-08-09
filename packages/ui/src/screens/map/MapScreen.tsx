@@ -28,7 +28,7 @@ import {
 } from '../../components/icons';
 import { compactMan, formatSignedMan, minutes, people } from '../../format';
 import mapDistrict from '../../assets/map-district.svg';
-import { BUILDINGS } from '../registry';
+import { BUILDING_GROUPS, buildingsInGroup } from '../registry';
 
 /**
  * 地図上の位置。**sim は座標を持たない**（docs/spec/screens/map.md）。
@@ -147,50 +147,62 @@ export function MapScreen(props: MapScreenProps) {
             訪問先。**ここに出ている建物だけが実装済み。**
             仕様の無い画面へは行けないので、行けない先を並べない（§7）
           */}
-          <h2
-            style={{
-              margin: 'var(--space-6) 0 var(--space-3)',
-              fontFamily: 'var(--font-display)',
-              fontSize: 'var(--text-label)',
-              fontWeight: 600,
-              color: 'var(--paper-dim)',
-              letterSpacing: '0.08em',
-            }}
-          >
-            訪問先
-          </h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 'var(--space-2)',
-            }}
-          >
-            {BUILDINGS.map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => props.onOpenBuilding(b.id)}
-                data-testid={`building-${b.id}`}
+          {BUILDING_GROUPS.map((group) => (
+            <div key={group}>
+              <h2
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 3,
-                  padding: 'var(--space-2) 2px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--ink-700)',
-                  background: 'var(--ink-800)',
-                  color: 'var(--paper)',
-                  cursor: 'pointer',
-                  WebkitTapHighlightColor: 'transparent',
+                  margin: 'var(--space-6) 0 var(--space-3)',
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 'var(--text-label)',
+                  fontWeight: 600,
+                  color: 'var(--paper-dim)',
+                  letterSpacing: '0.08em',
                 }}
               >
-                <img src={b.icon} alt="" width={34} height={34} style={{ display: 'block' }} />
-                <span style={{ fontSize: 'var(--text-caption)' }}>{b.name}</span>
-              </button>
-            ))}
-          </div>
+                {group}
+              </h2>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(5, 1fr)',
+                  gap: 'var(--space-2)',
+                }}
+              >
+                {buildingsInGroup(group).map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => props.onOpenBuilding(b.id)}
+                    data-testid={`building-${b.id}`}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 3,
+                      padding: 'var(--space-2) 1px',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--ink-700)',
+                      background: 'var(--ink-800)',
+                      color: 'var(--paper)',
+                      cursor: 'pointer',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}
+                  >
+                    <img src={b.icon} alt="" width={32} height={32} style={{ display: 'block' }} />
+                    <span
+                      style={{
+                        fontSize: 'var(--text-caption)',
+                        lineHeight: 1.2,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {b.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -324,6 +324,7 @@ export function realEstateTickOf(input: {
   ownedSince: Record<ClinicId, Month>;
   bookValueByClinic: Record<ClinicId, Man>;
 }): RealEstateTick {
+  const rentIfOwned = CLINIC_FIXED_COST_PER_MONTH * CLINIC_RENT_SHARE;
   const properties: PropertyView[] = input.clinics.map((c) => {
     const ownedSinceMonth = input.ownedSince[c.id] ?? null;
     const owned = ownedSinceMonth !== null;
@@ -334,7 +335,10 @@ export function realEstateTickOf(input: {
       ownedSinceMonth,
       price: PROPERTY_PRICE,
       bookValue: input.bookValueByClinic[c.id] ?? 0,
-      rentSaved: owned && c.open ? CLINIC_FIXED_COST_PER_MONTH * CLINIC_RENT_SHARE : 0,
+      rentSaved: owned && c.open ? rentIfOwned : 0,
+      rentIfOwned,
+      // 買う前から出す。買った後にしか回収年数が見えないのでは判断に使えない
+      paybackYears: PROPERTY_PRICE / (rentIfOwned * MONTHS_PER_YEAR),
     };
   });
   return {

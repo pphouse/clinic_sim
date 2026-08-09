@@ -58,6 +58,7 @@
   --bank-surface:     #10231a;  --bank-accent:     #4fa97a;
   --pharmacy-surface: #16241c;  --pharmacy-accent: #7cc08a;
   --school-surface:   #1a1d2c;  --school-accent:   #8b8ce0;
+  --vendor-surface:   #171f26;  --vendor-accent:   #7f9bb5;  /* 商社＝鋼青。機械の色 */
 
   /* --- 書体 */
   --font-display: 'Zen Old Mincho', serif;

@@ -140,6 +140,13 @@ for (const [id, name] of [
   ['nursingSchool', '21-school'],
   ['bank', '22-bank'],
   ['bureau', '23-bureau'],
+  ['medicalAssociation', '23a-shikai'],
+  ['referralHospital', '23b-hospital'],
+  ['careManager', '23c-care'],
+  ['pharmacy', '23d-pharmacy'],
+  ['vendor', '23e-vendor'],
+  ['realEstate', '23f-estate'],
+  ['personalWealth', '23g-personal'],
 ]) {
   await page.getByTestId(`building-${id}`).click();
   await beat(1500);
@@ -147,6 +154,32 @@ for (const [id, name] of [
   await page.getByLabel('閉じる').click();
   await beat(700);
 }
+
+// --- 外の相手は操作卓を持つ。押した結果が翌月以降の120ヶ月に効くところを見せる
+//
+// ★ここがこのツアーで一番大事な場面。連携基幹病院で「活動する」を押すと、
+// 紹介の係数が立ち上がり、**同じ月の新規患者がその場で増える**。
+// シム核は純粋関数なので、押した瞬間に10年ぶんの未来が組み替わっている。
+await page.getByTestId('building-referralHospital').click();
+await beat(1400);
+await shot('23h-hospital-before');
+await page.getByRole('button', { name: /活動する/ }).click();
+await beat(1600);
+await shot('23i-hospital-after');
+await page.getByLabel('閉じる').click();
+await beat(700);
+
+// 商社はカルテ・機器・AI の3タブ
+await page.getByTestId('building-vendor').click();
+await beat(1200);
+await page.getByRole('button', { name: '医療機器', exact: true }).click();
+await beat(1400);
+await shot('23j-vendor-equipment');
+await page.getByRole('button', { name: 'AI' }).click();
+await beat(1400);
+await shot('23k-vendor-ai');
+await page.getByLabel('閉じる').click();
+await beat(700);
 
 // --- 経理は3タブ。貸借と資金も見せる
 await page.getByTestId('building-accounting').click();
