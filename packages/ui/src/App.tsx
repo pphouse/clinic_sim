@@ -1,8 +1,8 @@
 /**
  * プロトタイプの器。
  *
- * README の「診療所画面 1 枚で手触りを確認」のための最小構成。
- * 実装済みの画面は診療所だけ。マップも本社も無いので、ここは**足場**であって画面ではない。
+ * 実装済みの画面はマップと診療所。マップが根で、診療所は全画面差し替えのモーダル。
+ * 本社も医局も銀行もまだ無い（仕様の無い画面は実装しない。CLAUDE.md §7）。
  *
  * ★重要：意思決定を変えると、120ヶ月を丸ごと計算し直している。
  * シム核は純粋関数なので差分更新は要らないし、やってはいけない。
@@ -17,13 +17,14 @@ import {
   type MonthDecision,
 } from '@med/sim';
 import { ClinicScreen, type ClinicTabId } from './screens/clinic/ClinicScreen';
+import { MapScreen } from './screens/map/MapScreen';
 
 export function App() {
   const [decisions, setDecisions] = useState<MonthDecision[]>(BASELINE_SCENARIO.decisions);
   const [month, setMonth] = useState(1);
-  const [clinicId, setClinicId] = useState<ClinicId>('A');
   const [tab, setTab] = useState<ClinicTabId>('overview');
-  const [open, setOpen] = useState(true);
+  /** 開いている診療所。null ならマップ（根） */
+  const [openClinic, setOpenClinic] = useState<ClinicId | null>(null);
 
   const run = useMemo(
     () => runSimulation({ ...BASELINE_SCENARIO, decisions }),
@@ -33,10 +34,13 @@ export function App() {
   const modified = decisions !== BASELINE_SCENARIO.decisions;
   const result = run.months[month - 1]!;
   const previous = month > 1 ? run.months[month - 2]! : null;
-  const clinicName = CLINICS.find((c) => c.id === clinicId)?.name ?? clinicId;
+  const clinicName = CLINICS.find((c) => c.id === openClinic)?.name ?? openClinic ?? '';
+
+  const changeMonth = (delta: number) =>
+    setMonth((m) => Math.min(run.months.length, Math.max(1, m + delta)));
 
   /** 表示中の月の医師配置を書き換える。以後の月にも効く（意思決定は据え置きが既定） */
-  function setDoctors(next: number) {
+  function setDoctors(clinicId: ClinicId, next: number) {
     setDecisions((current) => {
       const index = current.findIndex((d) => d.month === month);
       if (index >= 0) {
@@ -54,79 +58,35 @@ export function App() {
     });
   }
 
-  if (!open) {
+  if (openClinic === null) {
     return (
-      <PrototypeHome
-        onSelect={(id) => {
-          setClinicId(id);
-          setOpen(true);
-        }}
+      <MapScreen
+        result={result}
+        previous={previous}
+        onOpenClinic={setOpenClinic}
+        onMonthChange={changeMonth}
+        canGoBack={month > 1}
+        canGoForward={month < run.months.length}
       />
     );
   }
 
   return (
     <ClinicScreen
-      clinicId={clinicId}
+      clinicId={openClinic}
       clinicName={clinicName}
       result={result}
       previous={previous}
       history={run.months}
       tab={tab}
       onTabChange={setTab}
-      onClose={() => setOpen(false)}
-      onDoctorsChange={setDoctors}
-      onMonthChange={(delta) =>
-        setMonth((q) => Math.min(run.months.length, Math.max(1, q + delta)))
-      }
+      onClose={() => setOpenClinic(null)}
+      onDoctorsChange={(next) => setDoctors(openClinic, next)}
+      onMonthChange={changeMonth}
       canGoBack={month > 1}
       canGoForward={month < run.months.length}
       modified={modified}
       onReset={() => setDecisions(BASELINE_SCENARIO.decisions)}
     />
-  );
-}
-
-/**
- * 診療所へ入るためだけの足場。**マップ画面ではない。**
- * マップは docs/spec/screens/map.md が空のまま。仕様の無い画面は実装しない（CLAUDE.md §7）。
- */
-function PrototypeHome({ onSelect }: { onSelect: (id: ClinicId) => void }) {
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        gap: 'var(--space-3)',
-        padding: 'var(--space-6)',
-        background: 'var(--ink-900)',
-      }}
-    >
-      <p style={{ margin: 0, fontSize: 'var(--text-caption)', color: 'var(--paper-mute)' }}>
-        マップ画面は未実装。仕様書が空のまま実装しない（CLAUDE.md §7）
-      </p>
-      {CLINICS.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          onClick={() => onSelect(c.id)}
-          style={{
-            padding: 'var(--space-4)',
-            textAlign: 'left',
-            background: 'var(--ink-800)',
-            border: '1px solid var(--ink-600)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--paper)',
-            fontSize: 'var(--text-body)',
-            cursor: 'pointer',
-          }}
-        >
-          {c.name}
-        </button>
-      ))}
-    </div>
   );
 }

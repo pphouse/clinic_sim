@@ -303,6 +303,8 @@ export interface MonthResult {
 export interface GameEvent {
   id: string;
   month: Month;
+  /** どの院の話か。全社の話なら未設定。id 文字列から院を推測させないために持つ */
+  clinicId?: ClinicId;
   severity: 'info' | 'warning' | 'critical';
   /** UI の通知バッジをどの画面に出すか */
   screen: ScreenId;

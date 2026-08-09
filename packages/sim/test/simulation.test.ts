@@ -11,9 +11,14 @@ import { assertBalanced } from '../src/accounting';
 import {
   REPUTATION_STARS_MIN,
   addonLapseMonths,
+  clinicSummaries,
+  congestionOf,
   deriveGroupTotals,
+  groupSummary,
   reputationStars,
 } from '../src/derive';
+import { CRITICAL_WAIT_MINUTES } from '../src/events';
+import { TOLERABLE_WAIT_MINUTES } from '../src/constants';
 import { INITIAL_CASH, TOTAL_MONTHS } from '../src/constants';
 import { BASELINE_SCENARIO } from '../src/scenario';
 import { runSimulation } from '../src/simulation';
@@ -190,6 +195,43 @@ describe('評判の星', () => {
     );
     expect(worst).toBeGreaterThan(2);
     expect(worst).toBeLessThan(2.1);
+  });
+});
+
+describe('マップが読む値', () => {
+  it('混雑は許容と危機のしきい値で3段階に分かれる', () => {
+    expect(congestionOf(TOLERABLE_WAIT_MINUTES)).toBe('calm');
+    expect(congestionOf(TOLERABLE_WAIT_MINUTES + 0.1)).toBe('warning');
+    expect(congestionOf(CRITICAL_WAIT_MINUTES)).toBe('critical');
+  });
+
+  it('未開院の院は open=false で、開院月を持つ', () => {
+    const first = clinicSummaries(run.months[0]!);
+    expect(first.find((c) => c.id === 'A')!.open).toBe(true);
+    const b = first.find((c) => c.id === 'B')!;
+    expect(b.open).toBe(false);
+    expect(b.openMonth).toBe(19);
+    // 開院した月からは open になる
+    expect(clinicSummaries(run.months[18]!).find((c) => c.id === 'B')!.open).toBe(true);
+  });
+
+  it('待ち時間のピーク月、A院だけが危機になる', () => {
+    const peak = clinicSummaries(run.months[18]!);
+    expect(peak.find((c) => c.id === 'A')!.congestion).toBe('critical');
+    expect(peak.find((c) => c.id === 'B')!.congestion).toBe('calm');
+  });
+
+  it('通知は院に紐づく。id 文字列から推測しない', () => {
+    const peak = clinicSummaries(run.months[18]!);
+    expect(peak.find((c) => c.id === 'A')!.eventCount).toBeGreaterThan(0);
+    expect(peak.find((c) => c.id === 'C')!.eventCount).toBe(0);
+  });
+
+  it('全社サマリは現金を持つ。マップが資金ショートに気づく場所だから', () => {
+    const shortage = run.months.find((t) => t.financials.balanceSheet.cash < 0)!;
+    const summary = groupSummary(shortage, run.months[shortage.month - 2] ?? null);
+    expect(summary.cash).toBeLessThan(0);
+    expect(summary.patientStock).toBeGreaterThan(0);
   });
 });
 

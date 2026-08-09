@@ -13,6 +13,8 @@ Higgsfield（Recraft V4.1 の `vector` モード）で生成した SVG。
 | `tab-overview.svg` | 1:1 | 下タブ「概要」＝聴診器 |
 | `tab-patients.svg` | 1:1 | 下タブ「患者」＝人物3体 |
 | `tab-income.svg` | 1:1 | 下タブ「収支」＝電卓と書類 |
+| `map-district.svg` | 1:1 | マップ画面の街区（ピンの下地） |
+| `tab-map.svg` | 1:1 | 地図アイコン（現状は未使用。マップが根なのでタブに出さない） |
 
 パレットは `design/tokens.css` の値をそのまま渡している。
 `#6e8ca0`（hq accent）/ `#e8ede9`（paper）/ `#2a3843` / `#1f2a34` / `#0e1419` /
@@ -25,6 +27,9 @@ Higgsfield（Recraft V4.1 の `vector` モード）で生成した SVG。
 - **イラスト帯は左上を空ける。** ScreenShell が NPC の台詞をそこに重ねる
   （`left:0 right:30% top:16px`）。「upper left third is empty sky reserved for text」と書く
 - **立ち絵は余白付きで中央に、背景と明確に分離。** 切り抜きのため
+- **地図の下地は「低コントラストで、上に置く目印が目立つように」と書く。**
+  `LOW CONTRAST, calm and recessive so that bright markers placed on top will stand out`。
+  これを書かないと建物が明るく塗られ、ピンが埋もれる
 - **小さく使うアイコンは「26pxで読める」と書く。** ディテールを盛られると潰れる。
   `bold simple silhouette, very few details, readable at 26 pixels` が効いた
 

@@ -4,8 +4,9 @@
  * 同じ集計が複数画面に散ると必ずどこかがズレるので、
  * 「複数画面で使う数字」は例外なくこのファイルに置く。
  */
-import { REPUTATION_MAX, REPUTATION_MIN } from './constants';
-import type { ClinicTick, GameEvent, Man, Month, MonthResult, ScreenId } from './types';
+import { CLINICS, REPUTATION_MAX, REPUTATION_MIN, TOLERABLE_WAIT_MINUTES } from './constants';
+import { CRITICAL_WAIT_MINUTES } from './events';
+import type { ClinicId, ClinicTick, GameEvent, Man, Month, MonthResult, ScreenId } from './types';
 
 export interface GroupTotals {
   /** 診療収入（保険＋自費）。学費・賃料は含まない */
@@ -198,5 +199,77 @@ export function clinicDelta(
     patientStock: now.patientStock - before.patientStock,
     waitMinutes: now.waitMinutes - before.waitMinutes,
     reputation: now.reputation - before.reputation,
+  };
+}
+
+// ---------------------------------------------------------------- マップ
+
+/** 混雑の3段階。しきい値は sim が持つ。UI に 20 や 45 を直書きさせない */
+export type Congestion = 'calm' | 'warning' | 'critical';
+
+export function congestionOf(waitMinutes: number): Congestion {
+  if (waitMinutes >= CRITICAL_WAIT_MINUTES) return 'critical';
+  if (waitMinutes > TOLERABLE_WAIT_MINUTES) return 'warning';
+  return 'calm';
+}
+
+export interface ClinicSummary {
+  id: ClinicId;
+  name: string;
+  /** 開院済みか */
+  open: boolean;
+  openMonth: Month;
+  patientStock: number;
+  waitMinutes: number;
+  reputation: number;
+  doctors: number;
+  congestion: Congestion;
+  /** その院に紐づく通知の数。マップのバッジに使う */
+  eventCount: number;
+}
+
+/**
+ * 各院の現在地。マップ画面が読む。
+ *
+ * **他院との比較はマップの仕事**（診療所画面ではやらない）。
+ * 横並びで見て初めて「B院だけ空いている」が分かるので、並べる形はここで作る。
+ */
+export function clinicSummaries(result: MonthResult): ClinicSummary[] {
+  return CLINICS.map((config) => {
+    const tick = result.clinics.find((c) => c.id === config.id);
+    const open = result.month >= config.openMonth;
+    return {
+      id: config.id,
+      name: config.name,
+      open,
+      openMonth: config.openMonth,
+      patientStock: tick?.patientStock ?? 0,
+      waitMinutes: tick?.waitMinutes ?? 0,
+      reputation: tick?.reputation ?? 0,
+      doctors: result.staff.doctorsByClinic[config.id] ?? 0,
+      congestion: congestionOf(tick?.waitMinutes ?? 0),
+      eventCount: result.events.filter((e) => e.clinicId === config.id).length,
+    };
+  });
+}
+
+/** 全社の当月サマリ。マップ上部に出す */
+export interface GroupSummary {
+  patientStock: number;
+  patientStockDelta: number | null;
+  cash: Man;
+  cashDelta: number | null;
+  operatingIncome: Man;
+}
+
+export function groupSummary(result: MonthResult, previous: MonthResult | null): GroupSummary {
+  const cash = result.financials.balanceSheet.cash;
+  const stock = totalPatientStock(result);
+  return {
+    patientStock: stock,
+    patientStockDelta: previous ? stock - totalPatientStock(previous) : null,
+    cash,
+    cashDelta: previous ? cash - previous.financials.balanceSheet.cash : null,
+    operatingIncome: deriveGroupTotals(result).operatingIncome,
   };
 }

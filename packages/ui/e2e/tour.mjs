@@ -55,36 +55,41 @@ async function goToMonth(target) {
 
 await page.goto(BASE);
 await page.waitForSelector('[data-testid="month-label"]');
-await beat(1600);
-await shot('01-m01-overview');
+await beat(1700);
+await shot('01-map');
+
+// --- マップから診療所へ入る。マップが根で、診療所は全画面差し替え
+await page.getByTestId('clinic-row-A').click();
+await beat(1500);
+await shot('02-m01-overview');
 
 // --- 平常時。待ち時間15分、評判75
 await goToMonth(12);
 await beat(1200);
-await shot('02-m12-overview');
+await shot('03-m12-overview');
 
 // --- 13ヶ月目に常勤医が1名抜ける。待ち時間が跳ねる
 await goToMonth(13);
 await beat(1500);
-await shot('03-m13-doctor-lost');
+await shot('04-m13-doctor-lost');
 
 // --- 19ヶ月目＝B院の開院月。全社の看護師が薄まり、待ち時間がピークを打つ
 await goToMonth(19);
 await beat(1800);
-await shot('04-m19-wait-peak');
+await shot('05-m19-wait-peak');
 
 await page.getByRole('button', { name: '患者' }).click();
 await beat(1800);
-await shot('05-m19-patients');
+await shot('06-m19-patients');
 
 // --- 患者ストックの底は32〜38ヶ月目。ピークから約1年おくれてやってくる
 await goToMonth(33);
 await beat(1800);
-await shot('06-m33-stock-trough');
+await shot('07-m33-stock-trough');
 
 await page.getByRole('button', { name: '収支' }).click();
 await beat(1600);
-await shot('07-m33-income');
+await shot('08-m33-income');
 
 // --- ここから「もし13ヶ月目に医師を戻していたら」を同じ画面で比べる
 await page.getByRole('button', { name: '概要' }).click();
@@ -92,27 +97,34 @@ await goToMonth(13);
 await beat(1400);
 await page.getByLabel('常勤医を増やす').click();
 await beat(1800);
-await shot('08-m13-doctor-restored');
+await shot('09-m13-doctor-restored');
 
 await goToMonth(19);
 await beat(1800);
-await shot('09-m19-after-fix');
+await shot('10-m19-after-fix');
 
 await goToMonth(33);
 await beat(1600);
-await shot('10-m33-after-fix');
+await shot('11-m33-after-fix');
 
 // --- 既定シナリオへ戻す
 await page.getByRole('button', { name: '既定シナリオに戻す' }).click();
 await beat(1600);
-await shot('11-m33-reset');
+await shot('12-m33-reset');
+
+// --- マップへ戻る。混雑した院が赤く出ているか
+await page.getByLabel('閉じる').click();
+await beat(1500);
+await shot('13-map-trough');
+
+await goToMonth(19);
+await beat(1800);
+await shot('14-map-crisis');
 
 // --- 分院へ。B院は19ヶ月目に開院する
-await page.getByLabel('閉じる').click();
-await beat(1200);
-await page.getByRole('button', { name: 'B院' }).click();
-await beat(1400);
-await shot('12-clinic-b');
+await page.getByTestId('clinic-row-B').click();
+await beat(1600);
+await shot('15-clinic-b');
 
 await context.close();
 await browser.close();

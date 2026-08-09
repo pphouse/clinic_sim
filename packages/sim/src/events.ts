@@ -41,6 +41,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
     if (clinic.waitMinutes >= CRITICAL_WAIT_MINUTES) {
       push({
         id: `wait-critical-${clinic.id}-${q}`,
+        clinicId: clinic.id,
         severity: 'critical',
         screen: 'clinic',
         title: `${name}：待ち時間 ${clinic.waitMinutes.toFixed(0)} 分`,
@@ -49,6 +50,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
     } else if (clinic.waitMinutes > TOLERABLE_WAIT_MINUTES) {
       push({
         id: `wait-warning-${clinic.id}-${q}`,
+        clinicId: clinic.id,
         severity: 'warning',
         screen: 'clinic',
         title: `${name}：待ち時間 ${clinic.waitMinutes.toFixed(0)} 分`,
@@ -58,6 +60,7 @@ export function collectEvents(input: EventInput): GameEvent[] {
     if (clinic.reputation <= REPUTATION_MIN) {
       push({
         id: `reputation-floor-${clinic.id}-${q}`,
+        clinicId: clinic.id,
         severity: 'critical',
         screen: 'clinic',
         title: `${name}：評判が下限に張り付いた`,

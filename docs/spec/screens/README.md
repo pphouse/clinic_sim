@@ -4,9 +4,9 @@
 
 | ScreenId | 画面 | 領域色 | ステータス |
 |---|---|---|---|
-| [`map`](screens/map.md) | マップ | `-` | 未着手 |
+| [`map`](screens/map.md) | マップ | `-` | **実装済み** |
 | [`hq`](screens/hq.md) | 本社 | `hq` | 未着手 |
-| [`clinic`](screens/clinic.md) | 診療所 | `hq` | 未着手 |
+| [`clinic`](screens/clinic.md) | 診療所 | `hq` | **実装済み** |
 | [`igyoku`](screens/igyoku.md) | 医局 | `igyoku` | 未着手 |
 | [`agency`](screens/agency.md) | 紹介会社 | `agency` | 未着手 |
 | [`medicalAssociation`](screens/medicalAssociation.md) | 地域医師会 | `shikai` | 未着手 |
@@ -24,6 +24,7 @@
 
 ## 実装の順序
 
+0. **map** — 根。ここだけモーダルではない。全社の現在地と、各院への入口
 1. **clinic** — ★最初の1枚。中核ループの手触りをここで確かめる
 2. **igyoku** + **agency** — 2つで1セット。トレードオフが主題なので同時に作る
 3. **accounting** — 三表。sim の会計レイヤーが正しいかがここで露見する
