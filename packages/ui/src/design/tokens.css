@@ -43,6 +43,9 @@
   --positive: #4fa97a;
   --negative: #d4645c;
   --warning:  #e0a63c;
+  /* 星。口コミの金色。warning と近いが意味が違うので別に持つ */
+  --star:     #e8b64c;
+  --star-off: #2f3b45;
   --critical: #c4566e;
 
   /* --- 領域色。訪問する建物ごとに面の色と差し色が変わる */

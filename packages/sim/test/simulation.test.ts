@@ -8,7 +8,12 @@
 import { describe, expect, it } from 'vitest';
 import locked from './golden/baseline.monthly.json';
 import { assertBalanced } from '../src/accounting';
-import { addonLapseMonths, deriveGroupTotals } from '../src/derive';
+import {
+  REPUTATION_STARS_MIN,
+  addonLapseMonths,
+  deriveGroupTotals,
+  reputationStars,
+} from '../src/derive';
 import { INITIAL_CASH, TOTAL_MONTHS } from '../src/constants';
 import { BASELINE_SCENARIO } from '../src/scenario';
 import { runSimulation } from '../src/simulation';
@@ -158,6 +163,33 @@ describe('月刻みで見えるようになったもの', () => {
         expect(c.visitsServed).toBeLessThanOrEqual(c.demandVisits + 1e-9);
       }
     }
+  });
+});
+
+describe('評判の星', () => {
+  it('評判の下限がちょうど星1、上限が星5になる', () => {
+    expect(REPUTATION_STARS_MIN).toBe(1);
+    expect(reputationStars(100)).toBe(5);
+    expect(reputationStars(75)).toBeCloseTo(3.75, 10);
+  });
+
+  it('既定シナリオの星は 1〜5 の外に出ない', () => {
+    for (const t of run.months) {
+      for (const c of t.clinics) {
+        if (c.capacity === 0 && c.patientStock === 0) continue;
+        const stars = reputationStars(c.reputation);
+        expect(stars, `${t.month}ヶ月目 ${c.id}院`).toBeGreaterThanOrEqual(1);
+        expect(stars, `${t.month}ヶ月目 ${c.id}院`).toBeLessThanOrEqual(5);
+      }
+    }
+  });
+
+  it('医師不足の底では星2台まで落ちる', () => {
+    const worst = Math.min(
+      ...run.months.map((t) => reputationStars(t.clinics.find((c) => c.id === 'A')!.reputation)),
+    );
+    expect(worst).toBeGreaterThan(2);
+    expect(worst).toBeLessThan(2.1);
   });
 });
 

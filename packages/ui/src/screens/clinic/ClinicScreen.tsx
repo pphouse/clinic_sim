@@ -15,11 +15,13 @@ import {
   MONTHS_PER_YEAR,
   eventsForScreen,
   monthLabel,
+  reputationStars,
   unservedVisits,
   type ClinicId,
   type MonthResult,
 } from '@med/sim';
 import { IconButton } from '../../components/IconButton';
+import { StarRating } from '../../components/StarRating';
 import { ScreenShell, type ShellTab } from '../../components/ScreenShell';
 import { StatRow } from '../../components/StatRow';
 import {
@@ -91,6 +93,36 @@ function HeroStat({
   );
 }
 
+/**
+ * 評判だけは星で出す。
+ *
+ * 20〜100 の数値は「41.4 が悪い」と分かるまでに一拍かかる。
+ * 評判はプレイヤーが直接いじれない結果なので、精度より体感を優先する。
+ * 数値も小さく併記するのは、月次の緩慢な変化を追えるようにするため。
+ */
+function HeroStar({ reputation }: { reputation: number }) {
+  const stars = reputationStars(reputation);
+  return (
+    <div style={{ textAlign: 'center', minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'center', height: 28, alignItems: 'center' }}>
+        <StarRating value={stars} size={17} label={`評判 5段階中 ${stars.toFixed(1)}`} />
+      </div>
+      <div
+        style={{
+          fontSize: 'var(--text-caption)',
+          color: 'var(--paper-dim)',
+          marginTop: 2,
+        }}
+      >
+        評判
+        <span className="num" style={{ marginLeft: 5, color: 'var(--paper-mute)' }}>
+          {stars.toFixed(1)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function SectionTitle({ children }: { children: string }) {
   return (
     <h2
@@ -136,8 +168,6 @@ export function ClinicScreen(props: ClinicScreenProps) {
       : clinic.waitMinutes > TOLERABLE_WAIT_MINUTES
         ? 'warning'
         : undefined;
-  const reputationTone =
-    clinic.reputation < 50 ? 'critical' : clinic.reputation < 65 ? 'warning' : undefined;
 
   const tabs: ShellTab[] = [
     { id: 'overview', label: '概要', icon: <TabGlyph kind="overview" /> , badge: events.length },
@@ -185,12 +215,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
               unit="分"
               tone={waitTone}
             />
-            <HeroStat
-              label="評判"
-              value={points(clinic.reputation)}
-              unit=""
-              tone={reputationTone}
-            />
+            <HeroStar reputation={clinic.reputation} />
           </div>
 
           {props.tab === 'overview' && (

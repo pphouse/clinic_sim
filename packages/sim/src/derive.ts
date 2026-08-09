@@ -4,6 +4,7 @@
  * 同じ集計が複数画面に散ると必ずどこかがズレるので、
  * 「複数画面で使う数字」は例外なくこのファイルに置く。
  */
+import { REPUTATION_MAX, REPUTATION_MIN } from './constants';
 import type { ClinicTick, GameEvent, Man, Month, MonthResult, ScreenId } from './types';
 
 export interface GroupTotals {
@@ -103,6 +104,23 @@ export function addonLapseMonths(months: MonthResult[]): Month[] {
   }
   return lapsed;
 }
+
+/** 星の数。5段階 */
+export const REPUTATION_STAR_COUNT = 5;
+
+/**
+ * 評判を星に写す。
+ *
+ * 評判は 20〜100 で、REPUTATION_MIN=20 がちょうど星1、100 が星5になる。
+ * 口コミサイトの下限が星1で、星0が無いのと同じ形になっているのは偶然だが、
+ * 「最低でも1つは付いている」という手触りが実物と揃うので、この写像を採る。
+ */
+export function reputationStars(reputation: number): number {
+  return reputation / (REPUTATION_MAX / REPUTATION_STAR_COUNT);
+}
+
+/** 星の下限。評判が下限に張り付いたときの星の数 */
+export const REPUTATION_STARS_MIN = REPUTATION_MIN / (REPUTATION_MAX / REPUTATION_STAR_COUNT);
 
 /** 患者ストックの加重平均で見た全社評判 */
 export function groupReputation(result: MonthResult): number {
