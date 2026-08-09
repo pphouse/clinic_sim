@@ -10,6 +10,9 @@ Higgsfield（Recraft V4.1 の `vector` モード）で生成した SVG。
 | `clinic-illustration.svg` | 16:9 | 診療所画面のイラスト帯 |
 | `manager-portrait.svg` | 3:4 | NPC（事務長）の立ち絵 |
 | `clinic-icon.svg` | 1:1 | ヘッダのアイコン |
+| `tab-overview.svg` | 1:1 | 下タブ「概要」＝聴診器 |
+| `tab-patients.svg` | 1:1 | 下タブ「患者」＝人物3体 |
+| `tab-income.svg` | 1:1 | 下タブ「収支」＝電卓と書類 |
 
 パレットは `design/tokens.css` の値をそのまま渡している。
 `#6e8ca0`（hq accent）/ `#e8ede9`（paper）/ `#2a3843` / `#1f2a34` / `#0e1419` /
@@ -22,6 +25,8 @@ Higgsfield（Recraft V4.1 の `vector` モード）で生成した SVG。
 - **イラスト帯は左上を空ける。** ScreenShell が NPC の台詞をそこに重ねる
   （`left:0 right:30% top:16px`）。「upper left third is empty sky reserved for text」と書く
 - **立ち絵は余白付きで中央に、背景と明確に分離。** 切り抜きのため
+- **小さく使うアイコンは「26pxで読める」と書く。** ディテールを盛られると潰れる。
+  `bold simple silhouette, very few details, readable at 26 pixels` が効いた
 
 ## 後処理
 
@@ -29,7 +34,12 @@ Higgsfield（Recraft V4.1 の `vector` モード）で生成した SVG。
 
 1. **C2PA メタデータを削る。** base64 の塊が数十KB乗っている
 2. **立ち絵の背景を外す。** 全面を覆う矩形パスが1本目に入っているので、それだけ削除
-3. **立ち絵の座標系を直す。** `viewBox` が正方形なのに `width` が 3:4 で
+3. **アイコンは viewBox を実際の描画範囲まで詰める。**
+   生成物は対象の周りに canvas の 6 割ほど余白がある。そのままだと 27px の
+   タブアイコンで絵が潰れて読めない。`getBBox()` で測って正方形に切り直す
+4. **色をパレットに寄せる。** 指定した色以外（紫がかった青など）が混ざるので、
+   トークンの色のうち一番近いものへ寄せ直す
+5. **立ち絵の座標系を直す。** `viewBox` が正方形なのに `width` が 3:4 で
    `preserveAspectRatio="none"` という組み合わせで返ってくる。
    そのままだと拡大縮小で歪むので、`scale()` を焼き込んで素直な viewBox にした
 

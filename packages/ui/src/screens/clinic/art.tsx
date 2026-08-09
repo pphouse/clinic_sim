@@ -8,6 +8,9 @@
  * だから素材の側で「左上を空ける」構図にしてある。差し替えるときも同じ条件を守ること。
  */
 import clinicIcon from '../../assets/clinic-icon.svg';
+import tabIncome from '../../assets/tab-income.svg';
+import tabOverview from '../../assets/tab-overview.svg';
+import tabPatients from '../../assets/tab-patients.svg';
 import clinicIllustration from '../../assets/clinic-illustration.svg';
 import managerPortrait from '../../assets/manager-portrait.svg';
 
@@ -96,4 +99,21 @@ export function ManagerPortrait() {
       style={{ display: 'block', height: 112, width: 'auto', marginRight: 4 }}
     />
   );
+}
+
+/**
+ * 下タブのアイコン。
+ *
+ * 線画ではなくアイソメの立体ミニチュアにしている。線画は軽くて、
+ * 情報密度の高い画面の底に敷くと「仮置き」に見える。**物として存在させる。**
+ * 生成条件は assets/README.md。
+ */
+const TAB_ICONS = {
+  overview: tabOverview,
+  patients: tabPatients,
+  income: tabIncome,
+} as const;
+
+export function TabIcon({ kind }: { kind: keyof typeof TAB_ICONS }) {
+  return <img src={TAB_ICONS[kind]} alt="" width={27} height={27} style={{ display: 'block' }} />;
 }

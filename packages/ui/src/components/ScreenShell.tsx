@@ -16,6 +16,7 @@
  * 画面ブランチではこのファイルを編集しない（CLAUDE.md §3）。
  * 変更が必要なら issue を立てて main で対応する。
  */
+import type * as React from 'react';
 import type { ReactNode } from 'react';
 import { CloseIcon } from './icons';
 
@@ -71,11 +72,18 @@ export function ScreenShell({
 }: ScreenShellProps) {
   const surface = `var(--${domain}-surface)`;
   const accent = `var(--${domain}-accent)`;
+  /*
+   * 領域の差し色を CSS 変数として下位へ流す。
+   * こうしておくと、ボタンもグラフも罫線も「訪問先ごとに色が変わる」を
+   * 各画面が意識せずに満たせる。医局＝藍、紹介会社＝琥珀、厚生局＝灰赤。
+   */
+  const domainVars = { '--screen-accent': accent, '--screen-surface': surface } as React.CSSProperties;
 
   return (
     <div
       className="screen-shell"
       style={{
+        ...domainVars,
         position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column',
         background: surface, color: 'var(--paper)', fontFamily: 'var(--font-ui)',
       }}
@@ -169,7 +177,7 @@ export function ScreenShell({
                 className="tabbar__item"
                 onClick={() => onTabChange?.(tab.id)}
                 aria-current={active ? 'page' : undefined}
-                style={active ? { color: accent } : undefined}
+                style={active ? { color: 'var(--screen-accent)' } : undefined}
               >
                 <span aria-hidden style={{ width: 26, height: 26 }}>{tab.icon}</span>
                 {tab.label}

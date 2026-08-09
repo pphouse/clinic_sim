@@ -50,7 +50,7 @@
 }
 
 .btn:focus-visible {
-  outline: 2px solid var(--hq-accent);
+  outline: 2px solid var(--screen-accent, var(--hq-accent));
   outline-offset: 2px;
 }
 
@@ -61,14 +61,17 @@
   padding: 0;
 }
 
-/* 主操作。医師の増減のように「盤面が動く」ボタン */
+/*
+ * 主操作。医師の増減のように「盤面が動く」ボタン。
+ * 差し色は領域変数から取る。医局なら藍、紹介会社なら琥珀に自動で変わる
+ */
 .btn--primary {
-  width: 48px;
-  min-width: 48px;
-  height: 48px;
-  border-color: #3b4d5c;
+  width: 52px;
+  min-width: 52px;
+  height: 52px;
+  border-color: color-mix(in srgb, var(--screen-accent, var(--hq-accent)) 34%, var(--ink-600));
   background: linear-gradient(180deg, #26333e 0%, #1a242d 100%);
-  color: var(--hq-accent);
+  color: var(--screen-accent, var(--hq-accent));
 }
 
 /* 副操作。月送りのように「見る場所を変えるだけ」のボタン */
@@ -102,23 +105,31 @@
   opacity: 0.7;
 }
 
-/* 数値を挟むステッパー。増減ボタンと値をひとつの部品に見せる */
+/*
+ * 数値を挟むステッパー。
+ *
+ * ★横幅いっぱいに広げる。小さくまとめると「触る場所」に見えない。
+ * この画面で唯一、盤面を動かせるのがここなので、面積で主張させる。
+ */
 .stepper {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
+  width: 100%;
   padding: var(--space-1);
   border-radius: calc(var(--radius-md) + var(--space-1));
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.32);
   border: 1px solid var(--ink-700);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
 .stepper__value {
-  min-width: 62px;
+  flex: 1;
   text-align: center;
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--paper);
 }
@@ -168,4 +179,30 @@
   height: 2px;
   border-radius: 0 0 2px 2px;
   background: currentColor;
+}
+
+/*
+ * 値が変わったことを一度だけ光らせる。
+ *
+ * 月を送っても静止画が差し替わるだけだと、どこが動いたのか分からない。
+ * **一度だけ、短く。** 点滅させると読めなくなるし、遅延というこのゲームの
+ * 主題に対して「今すぐ効いた」という誤った印象を与える。
+ */
+@keyframes value-changed {
+  0% {
+    color: var(--screen-accent, var(--hq-accent));
+  }
+  100% {
+    color: inherit;
+  }
+}
+
+.value-changed {
+  animation: value-changed 620ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .value-changed {
+    animation: none;
+  }
 }

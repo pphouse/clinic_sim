@@ -36,7 +36,7 @@ import {
   PlusIcon,
 } from '../../components/icons';
 import { man, minutes, percent, people, points, visits } from '../../format';
-import { ClinicIcon, ClinicIllustration, ManagerPortrait } from './art';
+import { ClinicIcon, ClinicIllustration, ManagerPortrait, TabIcon } from './art';
 
 export type ClinicTabId = 'overview' | 'patients' | 'income';
 
@@ -83,7 +83,10 @@ function HeroStat({
   return (
     <div style={{ textAlign: 'center', minWidth: 0 }}>
       <div
-        className="num"
+        // key を値にすると、値が変わったときだけ要素が作り直されて
+        // アニメーションが1回だけ走る。useEffect でクラスを付け外しするより堅い
+        key={value}
+        className="num value-changed"
         style={{
           fontSize: 28,
           fontWeight: 700,
@@ -227,9 +230,9 @@ export function ClinicScreen(props: ClinicScreenProps) {
         : undefined;
 
   const tabs: ShellTab[] = [
-    { id: 'overview', label: '概要', icon: <TabGlyph kind="overview" /> , badge: events.length },
-    { id: 'patients', label: '患者', icon: <TabGlyph kind="patients" /> },
-    { id: 'income', label: '収支', icon: <TabGlyph kind="income" /> },
+    { id: 'overview', label: '概要', icon: <TabIcon kind="overview" />, badge: events.length },
+    { id: 'patients', label: '患者', icon: <TabIcon kind="patients" /> },
+    { id: 'income', label: '収支', icon: <TabIcon kind="income" /> },
   ];
 
   return (
@@ -507,9 +510,9 @@ function ControlDock(
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'baseline',
           justifyContent: 'space-between',
-          gap: 'var(--space-3)',
+          marginBottom: 6,
         }}
       >
         <span
@@ -521,7 +524,11 @@ function ControlDock(
         >
           常勤医
         </span>
-        <div className="stepper">
+        <span style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-mute)' }}>
+          動かすと以後の月がすべて計算し直される
+        </span>
+      </div>
+      <div className="stepper">
           <IconButton
             label="常勤医を減らす"
             tone="primary"
@@ -529,7 +536,11 @@ function ControlDock(
             disabled={!props.opened || props.doctors <= 0}
             onClick={() => props.onDoctorsChange(props.doctors - 1)}
           />
-          <span className="stepper__value" data-testid="doctor-count">
+          <span
+            key={props.doctors}
+            className="stepper__value value-changed"
+            data-testid="doctor-count"
+          >
             {props.doctors}
             <span className="stepper__unit">名</span>
           </span>
@@ -540,7 +551,6 @@ function ControlDock(
             disabled={!props.opened}
             onClick={() => props.onDoctorsChange(props.doctors + 1)}
           />
-        </div>
       </div>
 
       <div
@@ -606,29 +616,5 @@ function ControlDock(
         </div>
       </div>
     </div>
-  );
-}
-
-function TabGlyph({ kind }: { kind: 'overview' | 'patients' | 'income' }) {
-  if (kind === 'patients') {
-    return (
-      <svg viewBox="0 0 26 26" width="26" height="26" aria-hidden>
-        <circle cx="13" cy="9" r="4.5" fill="currentColor" />
-        <path d="M4 24 q3 -8 9 -8 q6 0 9 8 Z" fill="currentColor" />
-      </svg>
-    );
-  }
-  if (kind === 'income') {
-    return (
-      <svg viewBox="0 0 26 26" width="26" height="26" aria-hidden>
-        <rect x="4" y="4" width="18" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
-        <path d="M8 17 h10 M8 13 h10 M8 9 h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 26 26" width="26" height="26" aria-hidden>
-      <path d="M4 20 L10 12 L15 16 L22 6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
