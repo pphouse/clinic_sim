@@ -1,0 +1,171 @@
+/*
+ * 操作部品の見た目。**インラインスタイルではここを書けない。**
+ * 押した瞬間の反応（:active）と、押せないことの表現（:disabled）は
+ * 疑似クラスでしか書けず、これが無いとボタンは「絵」にしか見えない。
+ *
+ * 16画面ぶん共有する。画面ブランチでこのファイルを触らない（CLAUDE.md §3）。
+ */
+
+.btn {
+  /* 触れる大きさ。モバイルの最小は 44px（CLAUDE.md §5 の親指の話） */
+  min-width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--ink-600);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--ink-700) 0%, var(--ink-800) 100%);
+  color: var(--paper);
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  font-weight: 500;
+  cursor: pointer;
+  /* 上辺のハイライトと落ち影。これが無いと板が浮かず、平たい矩形に見える */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+  transition:
+    transform 90ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.btn:active:not(:disabled) {
+  /* 沈む。ハイライトを内側の影に入れ替えると「押し込んだ」ように見える */
+  transform: translateY(1px);
+  background: var(--ink-900);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55);
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.32;
+  box-shadow: none;
+  background: transparent;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--hq-accent);
+  outline-offset: 2px;
+}
+
+/* 正方形のアイコンだけのボタン */
+.btn--icon {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+}
+
+/* 主操作。医師の増減のように「盤面が動く」ボタン */
+.btn--primary {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  border-color: #3b4d5c;
+  background: linear-gradient(180deg, #26333e 0%, #1a242d 100%);
+  color: var(--hq-accent);
+}
+
+/* 副操作。月送りのように「見る場所を変えるだけ」のボタン */
+.btn--quiet {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  color: var(--paper-dim);
+  background: linear-gradient(180deg, var(--ink-800) 0%, var(--ink-900) 100%);
+}
+
+/* 文字だけのリンク的なボタン */
+.btn--link {
+  min-width: 0;
+  height: auto;
+  padding: 2px 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--warning);
+  font-size: var(--text-caption);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.btn--link:active:not(:disabled) {
+  transform: none;
+  background: none;
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+/* 数値を挟むステッパー。増減ボタンと値をひとつの部品に見せる */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  border-radius: calc(var(--radius-md) + var(--space-1));
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--ink-700);
+}
+
+.stepper__value {
+  min-width: 62px;
+  text-align: center;
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--paper);
+}
+
+.stepper__unit {
+  margin-left: 2px;
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--paper-dim);
+}
+
+/* 下タブ。押している間だけ沈み、選択中は上辺に差し色の線が出る */
+.tabbar__item {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  color: var(--paper-mute);
+  -webkit-tap-highlight-color: transparent;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.tabbar__item:active {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.tabbar__item[aria-current='page'] {
+  color: var(--paper);
+  background: var(--ink-800);
+}
+
+.tabbar__item[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 18%;
+  right: 18%;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: currentColor;
+}

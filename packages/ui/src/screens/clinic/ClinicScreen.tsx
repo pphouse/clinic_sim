@@ -19,8 +19,17 @@ import {
   type ClinicId,
   type MonthResult,
 } from '@med/sim';
+import { IconButton } from '../../components/IconButton';
 import { ScreenShell, type ShellTab } from '../../components/ScreenShell';
 import { StatRow } from '../../components/StatRow';
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronsLeftIcon,
+  ChevronsRightIcon,
+  MinusIcon,
+  PlusIcon,
+} from '../../components/icons';
 import { man, minutes, percent, people, points, visits } from '../../format';
 import { ClinicIcon, ClinicIllustration, ManagerPortrait } from './art';
 
@@ -149,6 +158,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
           ? greetingFor(clinic.waitMinutes, clinic.reputation, doctors)
           : 'この院はまだ開院していません。'
       }
+      dock={<ControlDock {...props} doctors={doctors} opened={opened} />}
       tabs={tabs}
       activeTabId={props.tab}
       onTabChange={(id) => props.onTabChange(id as ClinicTabId)}
@@ -345,7 +355,6 @@ export function ClinicScreen(props: ClinicScreenProps) {
         </>
       )}
 
-      <ControlDock {...props} doctors={doctors} opened={opened} />
     </ScreenShell>
   );
 }
@@ -353,6 +362,9 @@ export function ClinicScreen(props: ClinicScreenProps) {
 /**
  * 操作卓。親指の届く画面下半分に固定する（CLAUDE.md §5）。
  * 医師を増減すると意思決定の列が書き換わり、120ヶ月が丸ごと計算し直される。
+ *
+ * ★階層をつける。医師の増減は盤面が動く操作、月送りは見る場所が変わるだけの操作。
+ * 同じ見た目で並べると、どちらが取り返しのつかない操作なのか分からなくなる。
  */
 function ControlDock(
   props: ClinicScreenProps & { doctors: number; opened: boolean },
@@ -360,13 +372,11 @@ function ControlDock(
   return (
     <div
       style={{
-        position: 'sticky',
-        bottom: 0,
-        marginTop: 'var(--space-6)',
-        marginInline: 'calc(var(--space-4) * -1)',
+        flexShrink: 0,
         padding: 'var(--space-3) var(--space-4)',
         background: 'var(--ink-900)',
         borderTop: '1px solid var(--ink-600)',
+        boxShadow: '0 -10px 22px rgba(0, 0, 0, 0.5)',
       }}
     >
       <div
@@ -377,25 +387,31 @@ function ControlDock(
           gap: 'var(--space-3)',
         }}
       >
-        <span style={{ fontSize: 'var(--text-label)', color: 'var(--paper-dim)' }}>常勤医</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <StepButton
+        <span
+          style={{
+            fontSize: 'var(--text-label)',
+            color: 'var(--paper-dim)',
+            letterSpacing: '0.04em',
+          }}
+        >
+          常勤医
+        </span>
+        <div className="stepper">
+          <IconButton
             label="常勤医を減らす"
-            glyph="−"
+            tone="primary"
+            icon={<MinusIcon size={22} />}
             disabled={!props.opened || props.doctors <= 0}
             onClick={() => props.onDoctorsChange(props.doctors - 1)}
           />
-          <span
-            className="num"
-            data-testid="doctor-count"
-            style={{ fontSize: 'var(--text-title)', fontWeight: 700, minWidth: 44, textAlign: 'center' }}
-          >
+          <span className="stepper__value" data-testid="doctor-count">
             {props.doctors}
-            <span style={{ fontSize: 'var(--text-caption)', marginLeft: 2 }}>名</span>
+            <span className="stepper__unit">名</span>
           </span>
-          <StepButton
+          <IconButton
             label="常勤医を増やす"
-            glyph="＋"
+            tone="primary"
+            icon={<PlusIcon size={22} />}
             disabled={!props.opened}
             onClick={() => props.onDoctorsChange(props.doctors + 1)}
           />
@@ -412,99 +428,59 @@ function ControlDock(
         }}
       >
         <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
-          <StepButton
+          <IconButton
             label="1年戻る"
-            glyph="◀◀"
-            small
+            tone="quiet"
+            icon={<ChevronsLeftIcon size={19} />}
             disabled={!props.canGoBack}
             onClick={() => props.onMonthChange(-MONTHS_PER_YEAR)}
           />
-          <StepButton
+          <IconButton
             label="前の月へ"
-            glyph="◀"
+            tone="quiet"
+            icon={<ChevronLeftIcon size={19} />}
             disabled={!props.canGoBack}
             onClick={() => props.onMonthChange(-1)}
           />
         </div>
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ textAlign: 'center', minWidth: 0 }}>
           <div
             data-testid="month-label"
             data-month={props.result.month}
-            style={{ fontSize: 'var(--text-body)', fontWeight: 600, whiteSpace: 'nowrap' }}
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 17,
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+              letterSpacing: '0.02em',
+            }}
           >
             {monthLabel(props.result.month)}
           </div>
           {props.modified && (
-            <button
-              type="button"
-              onClick={props.onReset}
-              style={{
-                marginTop: 2,
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                color: 'var(--warning)',
-                fontSize: 'var(--text-caption)',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-              }}
-            >
+            <button type="button" className="btn btn--link" onClick={props.onReset}>
               既定シナリオに戻す
             </button>
           )}
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
-          <StepButton
+          <IconButton
             label="次の月へ"
-            glyph="▶"
+            tone="quiet"
+            icon={<ChevronRightIcon size={19} />}
             disabled={!props.canGoForward}
             onClick={() => props.onMonthChange(1)}
           />
-          <StepButton
+          <IconButton
             label="1年進む"
-            glyph="▶▶"
-            small
+            tone="quiet"
+            icon={<ChevronsRightIcon size={19} />}
             disabled={!props.canGoForward}
             onClick={() => props.onMonthChange(MONTHS_PER_YEAR)}
           />
         </div>
       </div>
     </div>
-  );
-}
-
-function StepButton({
-  label,
-  glyph,
-  onClick,
-  disabled,
-  small,
-}: {
-  label: string;
-  glyph: string;
-  onClick: () => void;
-  disabled?: boolean;
-  small?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        width: small ? 34 : 44,
-        height: 44,
-        borderRadius: 'var(--radius-sm)',
-        border: '1px solid var(--ink-600)',
-        background: disabled ? 'transparent' : 'var(--ink-700)',
-        color: disabled ? 'var(--paper-mute)' : 'var(--paper)',
-        fontSize: small ? 12 : 18,
-        cursor: disabled ? 'default' : 'pointer',
-      }}
-    >
-      {glyph}
-    </button>
   );
 }
 

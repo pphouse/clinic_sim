@@ -15,7 +15,13 @@
  *   数値  = Inter（tabular-nums 必須。桁が揃わないと財務諸表が読めない）
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+/*
+ * 書体は同梱する。Google Fonts を @import していたが、実行環境から
+ * fonts.googleapis.com へ出られず一度も当たっていなかった（全部 IPAGothic に落ちていた）。
+ * 外部CDNの生死にゲームの見た目を預けない。
+ * 作り直す: node packages/ui/scripts/build-fonts.mjs
+ */
+@import './fonts.css';
 
 :root {
   /* --- 基層。墨に僅かに紺を入れた無彩色 */

@@ -6,3 +6,5 @@ dist/
 .vite/
 coverage/
 e2e-out/
+# 書体の素体（1書体2〜5MB）。サブセット化した woff2 だけをコミットする
+vendor/fonts-src/
