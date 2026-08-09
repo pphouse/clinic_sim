@@ -71,6 +71,7 @@ export function App() {
       clinicName={clinicName}
       result={result}
       previous={previous}
+      history={run.months}
       tab={tab}
       onTabChange={setTab}
       onClose={() => setOpen(false)}

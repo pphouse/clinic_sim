@@ -13,6 +13,8 @@ import {
   REPUTATION_MIN,
   TOLERABLE_WAIT_MINUTES,
   MONTHS_PER_YEAR,
+  clinicDelta,
+  clinicSeries,
   eventsForScreen,
   monthLabel,
   reputationStars,
@@ -22,6 +24,7 @@ import {
 } from '@med/sim';
 import { IconButton } from '../../components/IconButton';
 import { StarRating } from '../../components/StarRating';
+import { TrendChart } from '../../components/TrendChart';
 import { ScreenShell, type ShellTab } from '../../components/ScreenShell';
 import { StatRow } from '../../components/StatRow';
 import {
@@ -42,8 +45,10 @@ export interface ClinicScreenProps {
   clinicName: string;
   /** 表示中の月の結果 */
   result: MonthResult;
-  /** 前月。月初の患者数を出すために読む */
+  /** 前月。月初の患者数と増減を出すために読む */
   previous: MonthResult | null;
+  /** 推移を描くための全期間。表示中の月までを切って使う */
+  history: MonthResult[];
   tab: ClinicTabId;
   onTabChange: (tab: ClinicTabId) => void;
   onClose: () => void;
@@ -62,11 +67,17 @@ function HeroStat({
   value,
   unit,
   tone,
+  delta,
+  /** 増えるのが良いか。待ち時間は増えたら赤 */
+  higherIsBetter = true,
 }: {
   label: string;
   value: string;
   unit: string;
   tone?: 'warning' | 'critical';
+  delta?: string;
+  higherIsBetter?: boolean;
+  deltaSign?: number;
 }) {
   const color = tone ? `var(--${tone})` : 'var(--paper)';
   return (
@@ -89,8 +100,34 @@ function HeroStat({
       <div style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-dim)', marginTop: 2 }}>
         {label}
       </div>
+      {delta !== undefined && (
+        <div
+          className="num"
+          style={{
+            fontSize: 'var(--text-caption)',
+            marginTop: 1,
+            color: delta.startsWith('±')
+              ? 'var(--paper-mute)'
+              : delta.startsWith('+') === higherIsBetter
+                ? 'var(--positive)'
+                : 'var(--negative)',
+          }}
+        >
+          {delta}
+        </div>
+      )}
     </div>
   );
+}
+
+/** 前月比の表示。0 のときに「+0」と出すと動いたように見えるので ± を使う */
+function formatDelta(value: number, digits: number, unit = ''): string {
+  const rounded = Number(value.toFixed(digits));
+  if (rounded === 0) return `±0${unit}`;
+  const sign = rounded > 0 ? '+' : '−';
+  const abs = Math.abs(rounded);
+  const body = digits === 0 ? Math.round(abs).toLocaleString('ja-JP') : abs.toFixed(digits);
+  return `${sign}${body}${unit}`;
 }
 
 /**
@@ -100,7 +137,7 @@ function HeroStat({
  * 評判はプレイヤーが直接いじれない結果なので、精度より体感を優先する。
  * 数値も小さく併記するのは、月次の緩慢な変化を追えるようにするため。
  */
-function HeroStar({ reputation }: { reputation: number }) {
+function HeroStar({ reputation, delta }: { reputation: number; delta?: string }) {
   const stars = reputationStars(reputation);
   return (
     <div style={{ textAlign: 'center', minWidth: 0 }}>
@@ -119,6 +156,22 @@ function HeroStar({ reputation }: { reputation: number }) {
           {stars.toFixed(1)}
         </span>
       </div>
+      {delta !== undefined && (
+        <div
+          className="num"
+          style={{
+            fontSize: 'var(--text-caption)',
+            marginTop: 1,
+            color: delta.startsWith('±')
+              ? 'var(--paper-mute)'
+              : delta.startsWith('+')
+                ? 'var(--positive)'
+                : 'var(--negative)',
+          }}
+        >
+          {delta}
+        </div>
+      )}
     </div>
   );
 }
@@ -160,6 +213,10 @@ export function ClinicScreen(props: ClinicScreenProps) {
   const clinic = result.clinics.find((c) => c.id === clinicId)!;
   const doctors = result.staff.doctorsByClinic[clinicId] ?? 0;
   const events = eventsForScreen(result, 'clinic');
+  const delta = clinicDelta(result, previous, clinicId);
+  // 直近2年。遅延が1年なので、山と谷が両方入る長さが要る
+  const stockSeries = clinicSeries(props.history, clinicId, 'patientStock', result.month, 24);
+  const waitSeries = clinicSeries(props.history, clinicId, 'waitMinutes', result.month, 24);
   const opened = clinic.capacity > 0 || clinic.patientStock > 0;
 
   const waitTone =
@@ -208,15 +265,58 @@ export function ClinicScreen(props: ClinicScreenProps) {
               padding: 'var(--space-4) 0',
             }}
           >
-            <HeroStat label="通院患者" value={people(clinic.patientStock)} unit="人" />
+            <HeroStat
+              label="通院患者"
+              value={people(clinic.patientStock)}
+              unit="人"
+              delta={delta ? formatDelta(delta.patientStock, 0, '人') : undefined}
+            />
             <HeroStat
               label="待ち時間"
               value={minutes(clinic.waitMinutes)}
               unit="分"
               tone={waitTone}
+              higherIsBetter={false}
+              delta={delta ? formatDelta(delta.waitMinutes, 1, '分') : undefined}
             />
-            <HeroStar reputation={clinic.reputation} />
+            <HeroStar
+              reputation={clinic.reputation}
+              delta={delta ? formatDelta(reputationStars(delta.reputation), 2) : undefined}
+            />
           </div>
+
+          {/*
+            ★この画面の主張。待ち時間の山と患者ストックの谷が1年ずれているのが、
+            数字ではなく形で見える。並べて描かないと因果は伝わらない
+          */}
+          {stockSeries.values.length > 1 && (
+            <div
+              style={{
+                padding: 'var(--space-3) 0 var(--space-2)',
+                borderTop: '1px solid var(--rule)',
+              }}
+            >
+              <TrendChart
+                series={[
+                  {
+                    label: '通院患者',
+                    color: 'var(--paper)',
+                    values: stockSeries.values,
+                    latest: people(clinic.patientStock),
+                  },
+                  {
+                    label: '待ち時間',
+                    color: 'var(--negative)',
+                    values: waitSeries.values,
+                    latest: `${minutes(clinic.waitMinutes)}分`,
+                    inverted: true,
+                  },
+                ]}
+                fromLabel={monthLabel(stockSeries.startMonth)}
+                toLabel={monthLabel(result.month)}
+              />
+            </div>
+          )}
 
           {props.tab === 'overview' && (
             <>

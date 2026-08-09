@@ -129,3 +129,74 @@ export function groupReputation(result: MonthResult): number {
   if (stock === 0) return 0;
   return open.reduce((sum, c) => sum + c.reputation * c.patientStock, 0) / stock;
 }
+
+// ---------------------------------------------------------------- 推移
+//
+// このゲームの主題は遅延なので、「今」だけ見せても伝わらない。
+// 待ち時間が跳ねた月と、患者ストックが減り始める月のズレが目で見えて初めて
+// 「壊すのは一瞬、直すのは何年」が成立する。UI で slice しないでここから取る。
+
+/** 折れ線に載せられる系列 */
+export type ClinicSeriesKey = 'patientStock' | 'waitMinutes' | 'reputation' | 'utilization';
+
+export interface ClinicSeries {
+  key: ClinicSeriesKey;
+  /** 古い順。長さは要求した月数か、それ未満（開院前は詰めない） */
+  values: number[];
+  /** values の先頭が何ヶ月目か */
+  startMonth: Month;
+}
+
+/**
+ * ある院の直近 count ヶ月の推移。開院前の月は含めない。
+ * upToMonth は 1 始まりの月インデックス。
+ */
+export function clinicSeries(
+  months: MonthResult[],
+  clinicId: string,
+  key: ClinicSeriesKey,
+  upToMonth: Month,
+  count: number,
+): ClinicSeries {
+  const end = Math.min(upToMonth, months.length);
+  const start = Math.max(1, end - count + 1);
+  const values: number[] = [];
+  let startMonth = start;
+  for (let m = start; m <= end; m++) {
+    const tick = months[m - 1]?.clinics.find((c) => c.id === clinicId);
+    if (!tick) continue;
+    // 開院前は capacity も stock も 0。線を 0 から立ち上げると誤読するので落とす
+    if (tick.capacity === 0 && tick.patientStock === 0) {
+      startMonth = m + 1;
+      values.length = 0;
+      continue;
+    }
+    values.push(tick[key]);
+  }
+  return { key, values, startMonth };
+}
+
+/** 前月からの増減。増減の併記が無いと、月を送っても何が動いたか分からない */
+export interface ClinicDelta {
+  patientStock: number;
+  waitMinutes: number;
+  reputation: number;
+}
+
+export function clinicDelta(
+  current: MonthResult,
+  previous: MonthResult | null,
+  clinicId: string,
+): ClinicDelta | null {
+  if (!previous) return null;
+  const now = current.clinics.find((c) => c.id === clinicId);
+  const before = previous.clinics.find((c) => c.id === clinicId);
+  if (!now || !before) return null;
+  // 開院月は前月が空なので増減を出さない（前月比 +3,222人 は嘘になる）
+  if (before.capacity === 0 && before.patientStock === 0) return null;
+  return {
+    patientStock: now.patientStock - before.patientStock,
+    waitMinutes: now.waitMinutes - before.waitMinutes,
+    reputation: now.reputation - before.reputation,
+  };
+}

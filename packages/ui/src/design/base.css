@@ -31,3 +31,18 @@ button {
     background: transparent;
   }
 }
+
+/*
+ * 面のテクスチャ。
+ *
+ * 単色で塗ると「背景が無い」ように見え、情報だけが宙に浮く。
+ * 細い縦縞を極薄で入れると、面として存在するようになる。
+ * **見えるか見えないかの濃さで入れること。** 縞が読めた時点で入れすぎ。
+ */
+.screen-shell {
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.016) 0 1px,
+    transparent 1px 7px
+  );
+}
