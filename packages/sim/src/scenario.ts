@@ -8,7 +8,8 @@
  * そのまま意思決定として書き下したもの。ゴールデンテストの入力になる。
  * **この列を変えるとゴールデンテストが落ちる。**
  */
-import type { ClinicId, EmrTier, ExternalRelationId, Man, Month } from './types';
+import { CLINICS } from './constants';
+import type { ClinicConfig, ClinicId, EmrTier, ExternalRelationId, Man, Month } from './types';
 
 /** ある月にプレイヤーが下す意思決定。省略した項目は「前月のまま」 */
 export interface MonthDecision {
@@ -60,6 +61,22 @@ export interface MonthDecision {
   executiveSalary?: Man;
   /** 個人で買うもの。法人の数字には効かない */
   buyPersonalAssets?: string[];
+
+  /** 分院を開く。CLINIC_SITES の id を渡す */
+  openClinic?: ClinicId;
+  /** 銀行から引く額（万円）。純資産の BANK_LEVERAGE_LIMIT 倍を超えると断られる */
+  borrow?: Man;
+}
+
+/**
+ * シナリオ単位で入り切る機構。**既定は全てオフ。**
+ *
+ * 突発事象だけはここで切り替える必要がある。意思決定で起こすものではないので、
+ * 「使わなければ眠っている」形にできない。既定シナリオがオフである限り、
+ * 検証済みの 120 ヶ月は一度も乱数を引かない。
+ */
+export interface ScenarioFeatures {
+  randomEvents?: boolean;
 }
 
 export interface Scenario {
@@ -73,6 +90,17 @@ export interface Scenario {
   /** 開始時点の看護師数。開院時は充足しているものとする */
   initialNurses: number;
   decisions: MonthDecision[];
+  /**
+   * 最初から存在する院。省略すると検証モデルの3院（A/B/C）。
+   * プレイ用のシナリオは A 院だけを置き、残りはプレイヤーが開く。
+   */
+  clinics?: ClinicConfig[];
+  features?: ScenarioFeatures;
+}
+
+/** シナリオが持つ院。省略時は検証モデルの3院 */
+export function clinicsOf(scenario: Scenario): ClinicConfig[] {
+  return scenario.clinics ?? CLINICS;
 }
 
 /**
@@ -115,3 +143,26 @@ export const BASELINE_SCENARIO: Scenario = {
 export function decisionAt(scenario: Scenario, month: Month): MonthDecision | undefined {
   return scenario.decisions.find((d) => d.month === month);
 }
+
+
+/**
+ * プレイ用のシナリオ。
+ *
+ * 検証モデルと違うのは3点だけ：
+ *   1. 最初は A 院だけ。**分院はプレイヤーが開く**
+ *   2. 突発事象が入る
+ *   3. 意思決定は空。全部プレイヤーが決める
+ *
+ * 数式は既定シナリオと同じものを通る。**別のゲームにはしていない。**
+ */
+export const PLAY_SCENARIO: Scenario = {
+  id: 'play',
+  name: '本編',
+  seed: 20240401,
+  totalMonths: 120,
+  initialIgyokuRelation: 60,
+  initialNurses: 7.5,
+  clinics: [CLINICS[0]!],
+  features: { randomEvents: true },
+  decisions: [{ month: 1, doctorsByClinic: { A: 3 } }],
+};

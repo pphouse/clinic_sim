@@ -255,23 +255,23 @@ export interface ClinicSummary {
  * **他院との比較はマップの仕事**（診療所画面ではやらない）。
  * 横並びで見て初めて「B院だけ空いている」が分かるので、並べる形はここで作る。
  */
+/**
+ * ★result.clinics から作る。CLINICS 定数を読まない。
+ * 分院はプレイ中に増えるので、定数を読むと「最初から決まっている3院」しか描けない。
+ */
 export function clinicSummaries(result: MonthResult): ClinicSummary[] {
-  return CLINICS.map((config) => {
-    const tick = result.clinics.find((c) => c.id === config.id);
-    const open = result.month >= config.openMonth;
-    return {
-      id: config.id,
-      name: config.name,
-      open,
-      openMonth: config.openMonth,
-      patientStock: tick?.patientStock ?? 0,
-      waitMinutes: tick?.waitMinutes ?? 0,
-      reputation: tick?.reputation ?? 0,
-      doctors: result.staff.doctorsByClinic[config.id] ?? 0,
-      congestion: congestionOf(tick?.waitMinutes ?? 0),
-      eventCount: result.events.filter((e) => e.clinicId === config.id).length,
-    };
-  });
+  return result.clinics.map((tick) => ({
+    id: tick.id,
+    name: tick.name,
+    open: tick.open,
+    openMonth: tick.openMonth,
+    patientStock: tick.patientStock,
+    waitMinutes: tick.waitMinutes,
+    reputation: tick.reputation,
+    doctors: result.staff.doctorsByClinic[tick.id] ?? 0,
+    congestion: congestionOf(tick.waitMinutes),
+    eventCount: result.events.filter((e) => e.clinicId === tick.id).length,
+  }));
 }
 
 /** 全社の当月サマリ。マップ上部に出す */

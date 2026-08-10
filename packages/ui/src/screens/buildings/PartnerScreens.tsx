@@ -758,7 +758,7 @@ const personalWealthBody = (props: BuildingScreenProps): Body => {
         )}
 
         <SectionTitle>役員報酬</SectionTitle>
-        <StatRow label="月額（上限 300万）" value={man(p.salary)} unit="万円" />
+        <StatRow label={`月額（上限 ${EXECUTIVE_SALARY_MAX}万）`} value={man(p.salary)} unit="万円" />
         <StatRow label="税・社会保険を引いた手取り" value={man(p.netSalary)} unit="万円" />
         <StatRow label="個人の現金" value={man(p.cash)} unit="万円" total />
 

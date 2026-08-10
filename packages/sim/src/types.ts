@@ -53,6 +53,13 @@ export interface ClinicState {
 /** 1 ヶ月の診療所シミュレーション結果 */
 export interface ClinicTick {
   id: ClinicId;
+  /**
+   * 院の素性。**分院はプレイ中に増えるので、UI が CLINICS 定数を読んではいけない。**
+   * 読むと「最初から決まっている3院」しか描けない。
+   */
+  name: string;
+  openMonth: Month;
+  open: boolean;
   newPatients: number;
   patientStock: number;
   /** 診察の需要（延べ回数） */
@@ -487,6 +494,8 @@ export interface MonthResult {
   events: GameEvent[];
   /** 拡張系。既定シナリオでは全項目が「何もしていない」状態で返る */
   expansion: ExpansionTick;
+  /** 3本のゴールの進捗と、終わったかどうか */
+  goals: GoalTick;
 }
 
 export interface GameEvent {
@@ -499,6 +508,77 @@ export interface GameEvent {
   screen: ScreenId;
   title: string;
   body: string;
+}
+
+// ---------------------------------------------------------------- ゴールと終局
+//
+// ★このゲームには「正解の勝ち方」を1つに絞らない。
+// 個人資産・規模・法人価値のどれで上がってもよく、**互いに食い合う**ところが主題。
+// 役員報酬を取れば個人は太るが法人は痩せる。分院を出せば規模は伸びるが現金が消える。
+
+export type GoalId = 'personalWealth' | 'scale' | 'corporate';
+
+export interface GoalSpec {
+  id: GoalId;
+  name: string;
+  /** 何を達成すれば上がりか。UI がそのまま出す */
+  description: string;
+  target: number;
+  unit: string;
+}
+
+export interface GoalProgress {
+  id: GoalId;
+  name: string;
+  description: string;
+  /** 今の値 */
+  value: number;
+  target: number;
+  unit: string;
+  /** 0〜1。1 で達成 */
+  ratio: number;
+  achieved: boolean;
+  /** 達成した月。まだなら null */
+  achievedAtMonth: Month | null;
+}
+
+export type EndReason = 'goal' | 'bankrupt' | 'timeUp';
+
+export interface EndState {
+  /** 終わっているか */
+  ended: boolean;
+  reason: EndReason | null;
+  month: Month | null;
+  /** 達成したゴール。bankrupt / timeUp なら空 */
+  achieved: GoalId[];
+  /** 称号。3つのゴールの進捗から引く */
+  title: string;
+  /** 債務超過が続いている月数。BANKRUPTCY_GRACE_MONTHS に達すると終わる */
+  insolventMonths: number;
+}
+
+export interface GoalTick {
+  goals: GoalProgress[];
+  end: EndState;
+}
+
+// ---------------------------------------------------------------- 突発事象
+
+export type RandomEventId =
+  | 'doctorResigned'
+  | 'nurseExodus'
+  | 'competitorOpened'
+  | 'bureauAudit'
+  | 'epidemic';
+
+/** 起きてしまった突発事象。効果は既に state へ適用済み */
+export interface RandomEventOccurrence {
+  id: RandomEventId;
+  month: Month;
+  clinicId?: ClinicId;
+  title: string;
+  body: string;
+  severity: 'info' | 'warning' | 'critical';
 }
 
 export type ScreenId =

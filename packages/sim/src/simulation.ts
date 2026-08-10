@@ -45,7 +45,12 @@ import {
   PHARMACY_INVITE_CAPEX,
   PERSONAL_TAX_RATE,
   PROPERTY_PRICE,
+  BANK_LEVERAGE_LIMIT,
+  CLINIC_SITES,
+  EPIDEMIC_DEMAND_UPLIFT,
 } from './constants';
+import { evaluateGoals } from './goals';
+import { rollRandomEvents } from './randomEvents';
 import {
   advanceRelations,
   initialRelationActivity,
@@ -67,7 +72,7 @@ import { buildStatements, depreciateAll, serviceLoans } from './accounting';
 import { collectEvents } from './events';
 import { initialAddonStatuses, tickFee } from './fee';
 import { monthLabel, tickClinic } from './engine';
-import { BASELINE_SCENARIO, decisionAt, type Scenario } from './scenario';
+import { BASELINE_SCENARIO, clinicsOf, decisionAt, type Scenario } from './scenario';
 import {
   SCHOOL_GRADUATES_PER_CLASS,
   allocateNurses,
@@ -80,10 +85,15 @@ import {
   tuitionRevenueFor,
 } from './staff';
 import type {
+  ClinicConfig,
   ClinicId,
   ClinicState,
   ExternalRelationId,
   ClinicTick,
+  GoalId,
+  GoalTick,
+  Month,
+  RandomEventOccurrence,
   ExpansionTick,
   FixedAsset,
   GameState,
@@ -91,6 +101,7 @@ import type {
   Loan,
   Man,
   MonthResult,
+  ScreenId,
   StaffTick,
 } from './types';
 
@@ -106,13 +117,22 @@ export interface SimulationRun {
 type MutableState = GameState & {
   doctorPlan: Record<ClinicId, number>;
   maintainIgyoku: boolean;
+  /**
+   * 存在する院の設定。**プレイ中に増える。**
+   * 競合の開業で newPatientPotential が恒久的に落ちるので、定数ではなく状態。
+   */
+  configs: ClinicConfig[];
+  goalAchievedAt: Partial<Record<GoalId, Month>>;
+  insolventMonths: number;
+  epidemicUntilMonth: Month | null;
 };
 
 function initialState(scenario: Scenario): MutableState {
+  const configs = clinicsOf(scenario).map((c) => ({ ...c }));
   return {
     month: 0,
     rngSeed: scenario.seed,
-    clinics: CLINICS.map<ClinicState>((c) => ({
+    clinics: configs.map<ClinicState>((c) => ({
       id: c.id,
       patientStock: 0,
       reputation: INITIAL_REPUTATION,
@@ -133,8 +153,12 @@ function initialState(scenario: Scenario): MutableState {
     accountsReceivable: 0,
     paidInCapital: INITIAL_CASH,
     retainedEarnings: 0,
-    doctorPlan: Object.fromEntries(CLINICS.map((c) => [c.id, 0])),
+    doctorPlan: Object.fromEntries(configs.map((c) => [c.id, 0])),
     maintainIgyoku: true,
+    configs,
+    goalAchievedAt: {},
+    insolventMonths: 0,
+    epidemicUntilMonth: null,
 
     // 拡張系。ここが全部「空」であることが、検証済みの数字を守る条件
     externalRelations: initialRelations(),
@@ -153,8 +177,8 @@ function initialState(scenario: Scenario): MutableState {
   };
 }
 
-function clinicAssets(clinicId: ClinicId, month: number): FixedAsset[] {
-  const equipment = CLINIC_CAPEX * CLINIC_CAPEX_EQUIPMENT_SHARE;
+function clinicAssets(clinicId: ClinicId, month: number, capex: Man = CLINIC_CAPEX): FixedAsset[] {
+  const equipment = capex * CLINIC_CAPEX_EQUIPMENT_SHARE;
   return [
     {
       id: `clinic-${clinicId}-equipment`,
@@ -170,18 +194,21 @@ function clinicAssets(clinicId: ClinicId, month: number): FixedAsset[] {
       name: `${clinicId}院 内装`,
       assetClass: 'interior',
       acquiredAtMonth: month,
-      acquisitionCost: CLINIC_CAPEX - equipment,
+      acquisitionCost: capex - equipment,
       usefulLifeMonths: USEFUL_LIFE_INTERIOR,
-      bookValue: CLINIC_CAPEX - equipment,
+      bookValue: capex - equipment,
     },
   ];
 }
 
 export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): SimulationRun {
   const state = initialState(scenario);
-  // 乱数は保守未加入の機器の故障判定にしか使わない。既定シナリオでは一度も引かれない
+  /**
+   * 乱数を引くのは2箇所だけ：保守未加入の機器の故障と、突発事象。
+   * **どちらも既定シナリオでは一度も起きない**ので、検証済みの120ヶ月は完全に決定的。
+   */
   const rng = createRng(scenario.seed);
-  const clinicNames = Object.fromEntries(CLINICS.map((c) => [c.id, c.name]));
+  const randomEventsOn = scenario.features?.randomEvents === true;
   const months: MonthResult[] = [];
 
   for (let month = 1; month <= scenario.totalMonths; month++) {
@@ -199,18 +226,47 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     }
     if (decision?.maintainIgyoku !== undefined) state.maintainIgyoku = decision.maintainIgyoku;
 
+    // 分院を開く。**開院月を state に足す**ので、以降このループが拾う
+    if (decision?.openClinic && !state.configs.some((c) => c.id === decision.openClinic)) {
+      const site = CLINIC_SITES.find((s) => s.id === decision.openClinic);
+      if (site) {
+        state.configs.push({
+          id: site.id,
+          name: site.name,
+          openMonth: month,
+          newPatientPotential: site.newPatientPotential,
+          initialPatientStock: site.initialPatientStock,
+        });
+        state.clinics.push({
+          id: site.id,
+          patientStock: 0,
+          reputation: INITIAL_REPUTATION,
+          reputationHistory: Array.from(
+            { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
+            () => INITIAL_REPUTATION,
+          ),
+          doctors: 0,
+        });
+        state.doctorPlan[site.id] = state.doctorPlan[site.id] ?? 1;
+      }
+    }
+
     let openedClinicsThisMonth = 0;
-    for (const config of CLINICS) {
+    for (const config of state.configs) {
       if (config.openMonth !== month) continue;
       openedClinicsThisMonth++;
-      capitalExpenditure += CLINIC_CAPEX;
-      state.assets.push(...clinicAssets(config.id, month));
-      newBorrowing += CLINIC_LOAN;
+      // 候補地ごとに投資額が違う。承継は患者が付いてくる代わりに高い
+      const site = CLINIC_SITES.find((s) => s.id === config.id);
+      const capex = site?.capex ?? CLINIC_CAPEX;
+      const loan = site?.loan ?? CLINIC_LOAN;
+      capitalExpenditure += capex;
+      state.assets.push(...clinicAssets(config.id, month, capex));
+      newBorrowing += loan;
       state.loans.push({
         id: `loan-clinic-${config.id}`,
         name: `${config.name} 開業資金`,
-        principal: CLINIC_LOAN,
-        outstanding: CLINIC_LOAN,
+        principal: loan,
+        outstanding: loan,
         monthlyRate: LOAN_MONTHLY_RATE,
         monthlyRepaymentRate: LOAN_REPAYMENT_RATE,
       });
@@ -388,9 +444,63 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       ),
     );
 
+    // 銀行から引く。**純資産の BANK_LEVERAGE_LIMIT 倍が上限。**
+    // 債務超過だと1円も引けない。落ちてから借りて延命する、ができないようにしてある
+    if (decision?.borrow && decision.borrow > 0) {
+      const equity = state.paidInCapital + state.retainedEarnings;
+      const outstanding = totalOutstanding(state.loans);
+      const room = Math.max(0, equity * BANK_LEVERAGE_LIMIT - outstanding);
+      const amount = Math.min(decision.borrow, room);
+      if (amount > 0) {
+        newBorrowing += amount;
+        state.loans.push({
+          id: `loan-bank-${month}`,
+          name: `運転資金 ${monthLabel(month)}`,
+          principal: amount,
+          outstanding: amount,
+          monthlyRate: LOAN_MONTHLY_RATE,
+          monthlyRepaymentRate: LOAN_REPAYMENT_RATE,
+        });
+      }
+    }
+
+    // ------------------------------------------------ 1.5 突発事象
+    //
+    // ★features.randomEvents がオフなら rng を一度も引かない。
+    // 既定シナリオはオフなので、検証済みの120ヶ月は完全に決定的なまま。
+    let extraordinaryLoss: Man = 0;
+    const randomEvents: RandomEventOccurrence[] = [];
+    if (randomEventsOn) {
+      const previousMonth = months[months.length - 1];
+      const rolled = rollRandomEvents({
+        month,
+        rng,
+        openClinics: state.configs.filter((c) => month >= c.openMonth),
+        doctorsByClinic: state.doctorPlan,
+        nurses: state.nurses,
+        addonTotal: previousMonth?.fee.addonTotal ?? 0,
+        insuranceRevenue: previousMonth?.financials.incomeStatement.insuranceRevenue ?? 0,
+      });
+      randomEvents.push(...rolled.events);
+
+      for (const [id, lost] of Object.entries(rolled.doctorsLost)) {
+        state.doctorPlan[id] = Math.max(0, (state.doctorPlan[id] ?? 0) - lost);
+      }
+      state.nurses = Math.max(0, state.nurses - rolled.nursesLost);
+      for (const [id, loss] of Object.entries(rolled.potentialLoss)) {
+        const config = state.configs.find((c) => c.id === id);
+        // **恒久的に落ちる。** 元には戻らない
+        if (config) config.newPatientPotential *= 1 - loss;
+      }
+      extraordinaryLoss += rolled.extraordinaryLoss;
+      if (rolled.epidemicUntilMonth !== null) state.epidemicUntilMonth = rolled.epidemicUntilMonth;
+    }
+    const epidemic =
+      state.epidemicUntilMonth !== null && month < state.epidemicUntilMonth;
+
     // ---------------------------------------------------------- 2. 人材
     const doctorsByClinic: Record<ClinicId, number> = {};
-    for (const config of CLINICS) {
+    for (const config of state.configs) {
       doctorsByClinic[config.id] = month >= config.openMonth ? (state.doctorPlan[config.id] ?? 0) : 0;
     }
     const doctorsTotal = Object.values(doctorsByClinic).reduce((a, b) => a + b, 0);
@@ -489,7 +599,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     let nursePayroll: Man = 0;
     let rent: Man = 0;
 
-    for (const config of CLINICS) {
+    for (const config of state.configs) {
       const previous = state.clinics.find((c) => c.id === config.id);
       if (!previous) continue;
       const doctors = doctorsByClinic[config.id] ?? 0;
@@ -511,6 +621,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         newPatientMultiplier,
         selfPayMultiplier,
         rentMultiplier,
+        demandMultiplier: epidemic ? 1 + EPIDEMIC_DEMAND_UPLIFT : 1,
       });
       clinicTicks.push(tick);
 
@@ -551,7 +662,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
 
     // 拡張系の収支。誘致も取得もしていなければ全て 0
     const pharmacy = pharmacyTickOf({
-      clinics: CLINICS.map((c) => {
+      clinics: state.configs.map((c) => {
         const tick = clinicTicks.find((t) => t.id === c.id);
         return {
           id: c.id,
@@ -570,7 +681,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       }
     }
     const realEstate = realEstateTickOf({
-      clinics: CLINICS.map((c) => ({ id: c.id, name: c.name, open: month >= c.openMonth })),
+      clinics: state.configs.map((c) => ({ id: c.id, name: c.name, open: month >= c.openMonth })),
       ownedSince: state.propertyOwnedSince,
       bookValueByClinic: propertyBookValue,
     });
@@ -605,7 +716,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       systemCost: vendor.recurringCost,
       headquarters: HQ_COST_PER_MONTH,
       interestExpense: serviced.interest,
-      extraordinaryLoss: 0,
+      extraordinaryLoss,
     };
 
     const expansion: ExpansionTick = {
@@ -642,6 +753,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     state.retainedEarnings = financials.balanceSheet.retainedEarnings;
     state.month = month;
 
+    const clinicNames = Object.fromEntries(state.configs.map((c) => [c.id, c.name]));
     const events = collectEvents({
       month,
       clinics: clinicTicks,
@@ -654,6 +766,21 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       graduatedNurses: graduates,
     });
 
+    // ---------------------------------------------------------- 6. ゴールと終局
+    const goalTick = evaluateGoals({
+      month,
+      totalPatientStock: clinicTicks.reduce((sum, c) => sum + c.patientStock, 0),
+      balanceSheet: financials.balanceSheet,
+      personal,
+      achievedAt: state.goalAchievedAt,
+      insolventMonths: state.insolventMonths,
+      totalMonths: scenario.totalMonths,
+    });
+    state.insolventMonths = goalTick.end.insolventMonths;
+    for (const g of goalTick.goals) {
+      if (g.achievedAtMonth !== null) state.goalAchievedAt[g.id] = g.achievedAtMonth;
+    }
+
     months.push({
       month,
       label: monthLabel(month),
@@ -661,13 +788,42 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       staff,
       fee,
       financials,
-      events,
+      events: [
+        ...events,
+        // 突発事象は通知として出す。どの画面に出すかは severity ではなく中身で決める
+        ...randomEvents.map((e) => ({
+          id: `random-${e.id}-${e.month}${e.clinicId ? `-${e.clinicId}` : ''}`,
+          month: e.month,
+          clinicId: e.clinicId,
+          severity: e.severity,
+          screen: screenForRandomEvent(e.id),
+          title: e.title,
+          body: e.body,
+        })),
+      ],
       expansion,
+      goals: goalTick,
     });
   }
 
   const { doctorPlan: _doctorPlan, maintainIgyoku: _maintainIgyoku, ...finalState } = state;
   return { scenarioId: scenario.id, months, finalState };
+}
+
+/** 突発事象をどの画面のバッジに出すか。原因のある場所へ送る */
+function screenForRandomEvent(id: RandomEventOccurrence['id']): ScreenId {
+  switch (id) {
+    case 'doctorResigned':
+      return 'personnel';
+    case 'nurseExodus':
+      return 'personnel';
+    case 'competitorOpened':
+      return 'map';
+    case 'bureauAudit':
+      return 'bureau';
+    case 'epidemic':
+      return 'map';
+  }
 }
 
 type BuildLines = Omit<

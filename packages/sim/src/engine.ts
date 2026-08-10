@@ -134,6 +134,8 @@ export interface ClinicTickInput {
   selfPayMultiplier?: number;
   /** 固定費（家賃）に掛かる係数。物件を買うと 1 を下回る */
   rentMultiplier?: number;
+  /** 受診需要に掛かる係数。感染症の流行で 1 を上回る */
+  demandMultiplier?: number;
 }
 
 export function tickClinic(input: ClinicTickInput): ClinicTick {
@@ -141,9 +143,10 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   const id = config.id;
 
   const isOpen = month >= config.openMonth;
+  const identity = { id, name: config.name, openMonth: config.openMonth, open: isOpen };
   if (!isOpen) {
     return {
-      id,
+      ...identity,
       newPatients: 0, patientStock: 0, demandVisits: 0,
       capacity: 0, effectiveCapacity: 0, utilization: 0,
       waitMinutes: 0, reputation: input.previousReputation, churnRate: 0,
@@ -159,7 +162,8 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   const newPatients =
     newPatientsOf(config.newPatientPotential, input.laggedReputation) *
     (input.newPatientMultiplier ?? 1);
-  const demandVisits = openingStock * VISITS_PER_PATIENT_PER_MONTH + newPatients;
+  const demandVisits =
+    (openingStock * VISITS_PER_PATIENT_PER_MONTH + newPatients) * (input.demandMultiplier ?? 1);
 
   const capacity = capacityOf(doctors, input.extraVisitsPerDoctorPerDay ?? 0);
   const effectiveCapacity = capacity * nurseSufficiency * (input.capacityMultiplier ?? 1);
@@ -187,7 +191,7 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
         CLINIC_FIXED_COST_PER_MONTH * (input.rentMultiplier ?? 1);
 
   return {
-    id,
+    ...identity,
     newPatients,
     patientStock,
     demandVisits,

@@ -13,7 +13,16 @@
  *   率を単純に 3 で割ると 3 ヶ月後に元より多く減る。ここを間違えると
  *   検証済みの挙動から静かにズレる。monthlyFromQuarterly() を必ず通すこと。
  */
-import type { Addon, ClinicConfig, EmrTier, ExternalRelationId, FeeRevision, Man } from './types';
+import type {
+  Addon,
+  ClinicConfig,
+  ClinicId,
+  EmrTier,
+  ExternalRelationId,
+  FeeRevision,
+  GoalSpec,
+  Man,
+} from './types';
 
 export const MONTHS_PER_YEAR = 12;
 export const MONTHS_PER_QUARTER = 3;
@@ -258,8 +267,11 @@ export const PROPERTY_PRICE = 9000;
 export const CLINIC_RENT_SHARE = 0.5;
 
 // --- 個人資産
-/** 役員報酬の上限（万円/月）。青天井にすると法人を空にできてしまう */
-export const EXECUTIVE_SALARY_MAX = 300;
+/**
+ * 役員報酬の上限（万円/月）。青天井にすると法人を空にできてしまう。
+ * 年 6,000 万。数院を持つ医療法人の理事長として不自然でない上限にしてある。
+ */
+export const EXECUTIVE_SALARY_MAX = 500;
 /** 役員報酬にかかる個人の税・社会保険。手取りはこの分だけ減る */
 export const PERSONAL_TAX_RATE = 0.45;
 
@@ -392,3 +404,157 @@ export const AI_TOOLS: AiToolSpec[] = [
   { id: 'triage',   name: '問診AI',     upfrontCost: 400,  recurringCost: 10, visitsPerDoctorPerDayBonus: 3 },
   { id: 'imaging',  name: '画像診断AI', upfrontCost: 1200, recurringCost: 20, visitsPerDoctorPerDayBonus: 4 },
 ];
+
+// ==================================================================
+// ゴール・終局・突発事象・分院の候補地
+//
+// ここも検証モデルには無い。**「いつ終わるか」と「何をもって勝ちか」は
+// 表計算では決められなかった部分**で、ゲームとして遊べるようにするために足した。
+// ==================================================================
+
+/**
+ * ゴールは3本立てで、**互いに食い合う**ようにしてある。
+ *
+ *   個人資産 ← 役員報酬。取れば取るほど法人が痩せる
+ *   規模     ← 分院。出せば出すほど現金が消え、医師会の関係も落ちる
+ *   法人価値 ← 内部留保。個人へ移さず、分院にも使わず、貯めた分だけ増える
+ *
+ * どれか1つでも届けば上がり。**3本同時に狙うと1本も届かない**という配分にしてある。
+ * 「正解の勝ち筋」を1つに決めてしまうと、経営の判断がパズルの正解探しになる。
+ */
+// ★目標値は**このモデルで実際に届く水準**に合わせて置いた。
+// 初期資本 1.5 億、A院の患者 3,200 人から始めて 10 年。
+// 検証済みの数式は「拡大するほど儲かる」形をしていない（枠を先に買うと死ぬ）ので、
+// 「10院に増やす」ような目標を置くと、どの遊び方でも届かない飾りになる。
+// 実際の到達点を測ってから決めた数字であり、**理想でも願望でもない。**
+export const GOALS: GoalSpec[] = [
+  {
+    id: 'personalWealth',
+    name: '資産家',
+    description: '院長個人の資産（現金＋見栄資産）を 1.5 億円まで積む',
+    target: 15000,
+    unit: '万円',
+  },
+  {
+    id: 'scale',
+    name: '規模',
+    description: '全社の通院患者を 8,000 人まで増やす',
+    target: 8000,
+    unit: '人',
+  },
+  {
+    id: 'corporate',
+    name: '内部留保',
+    // ★純資産ではなく**内部留保**（＝利益の蓄積）で測る。
+    // 純資産だと開始時点の資本金 1.5 億がそのまま乗ってしまい、
+    // 「何もしない」が達成率 62% になる。測りたいのは10年で何を積んだか
+    description: '10年で内部留保（利益の蓄積）を 5,000 万円積む',
+    target: 5000,
+    unit: '万円',
+  },
+];
+
+/**
+ * 債務超過が何ヶ月続いたら終わりか。
+ *
+ * ★1ヶ月で終わらせない理由：検証で分かったとおり、看護学校の 2.5 億は
+ * 費用ではなく校舎という資産で、あのときの「最低現金 −1.8億」は
+ * **債務超過ではなく資金繰りの谷**だった。谷で殺すと、正しい大型投資が全部
+ * 悪手になってしまう。1年沈みっぱなしなら、それはもう谷ではない。
+ */
+export const BANKRUPTCY_GRACE_MONTHS = 12;
+
+/** 終局の称号。達成率の合計から引く。上から見て最初に届いたもの */
+export const ENDING_TITLES: { minScore: number; title: string }[] = [
+  { minScore: 2.5, title: '医療法人グループ総帥' },
+  { minScore: 1.5, title: '地域一番の経営者' },
+  { minScore: 1.0, title: '目標を達成した院長' },
+  { minScore: 0.6, title: '堅実な開業医' },
+  { minScore: 0.3, title: '生き延びた院長' },
+  { minScore: 0, title: '志半ばの院長' },
+];
+
+// --- 分院の候補地
+//
+// 「どこに出すか」を選ばせるために、ポテンシャルと承継の有無を振ってある。
+// **承継は患者が付いてくる代わりに高い。** 新規は安いが評判が育つまで空く。
+
+export interface ClinicSite {
+  id: ClinicId;
+  name: string;
+  /** 一言で立地の性格。UI がそのまま出す */
+  character: string;
+  newPatientPotential: number;
+  /** 承継なら引き継ぐ患者数 */
+  initialPatientStock: number;
+  capex: Man;
+  /** 開院時に引ける融資 */
+  loan: Man;
+}
+
+export const CLINIC_SITES: ClinicSite[] = [
+  {
+    id: 'B',
+    name: 'B院（駅前）',
+    character: '人通りは多いが家賃も高い。新規開業',
+    newPatientPotential: 130 / MONTHS_PER_QUARTER,
+    initialPatientStock: 0,
+    capex: 6000,
+    loan: 8000,
+  },
+  {
+    id: 'C',
+    name: 'C院（住宅地）',
+    character: '落ち着いた住宅地。新規開業',
+    newPatientPotential: 110 / MONTHS_PER_QUARTER,
+    initialPatientStock: 0,
+    capex: 6000,
+    loan: 8000,
+  },
+  {
+    id: 'D',
+    name: 'D院（承継）',
+    character: '引退する先生の医院を引き継ぐ。患者が付いてくるが高い',
+    newPatientPotential: 90 / MONTHS_PER_QUARTER,
+    initialPatientStock: 1800,
+    capex: 11000,
+    loan: 12000,
+  },
+  {
+    id: 'E',
+    name: 'E院（新興住宅地）',
+    character: '若い世帯が増えている。伸びしろは大きい',
+    newPatientPotential: 160 / MONTHS_PER_QUARTER,
+    initialPatientStock: 0,
+    capex: 7000,
+    loan: 9000,
+  },
+];
+
+// --- 銀行（プレイヤーが引く借入）
+/** 1回に引ける額 */
+export const BANK_LOAN_UNIT = 5000;
+/** 純資産に対して何倍まで借りられるか。ここを超えると銀行が首を縦に振らない */
+export const BANK_LEVERAGE_LIMIT = 4;
+
+// --- 突発事象
+//
+// ★全て features.randomEvents がオンのときだけ引く。
+// 既定シナリオはオフなので、検証済みの 120 ヶ月は一度も乱数を引かない。
+
+/** 常勤医1名が1ヶ月に辞める確率 */
+export const DOCTOR_RESIGN_CHANCE = 0.005;
+/** 看護師の突発離職が起きる確率と、そのときに抜ける人数 */
+export const NURSE_EXODUS_CHANCE = 0.012;
+export const NURSE_EXODUS_COUNT = 3;
+/** 近隣に競合が開業する確率。その院の新規患者ポテンシャルが恒久的に落ちる */
+export const COMPETITOR_CHANCE = 0.005;
+export const COMPETITOR_POTENTIAL_LOSS = 0.15;
+/** 厚生局の個別指導。加算を多く持っているほど返還額が大きい */
+export const AUDIT_CHANCE = 0.008;
+/** 返還請求額＝有効な加算の合計率 × 保険診療収入 × この倍率 */
+export const AUDIT_CLAWBACK_MONTHS = 6;
+/** 感染症の流行。需要が増えるが、枠が足りなければ待ち時間に化ける */
+export const EPIDEMIC_CHANCE = 0.02;
+export const EPIDEMIC_DEMAND_UPLIFT = 0.2;
+export const EPIDEMIC_MONTHS = 3;
