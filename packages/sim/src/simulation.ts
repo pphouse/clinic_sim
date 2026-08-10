@@ -46,6 +46,8 @@ import {
   PERSONAL_TAX_RATE,
   PROPERTY_PRICE,
   BANK_LEVERAGE_LIMIT,
+  IGYOKU_DUTY_CAPACITY_DRAG,
+  IGYOKU_DUTY_GAIN_PER_MONTH,
   CLINIC_SITES,
   EPIDEMIC_DEMAND_UPLIFT,
 } from './constants';
@@ -117,6 +119,7 @@ export interface SimulationRun {
 type MutableState = GameState & {
   doctorPlan: Record<ClinicId, number>;
   maintainIgyoku: boolean;
+  igyokuDuty: boolean;
   /**
    * 存在する院の設定。**プレイ中に増える。**
    * 競合の開業で newPatientPotential が恒久的に落ちるので、定数ではなく状態。
@@ -155,6 +158,7 @@ function initialState(scenario: Scenario): MutableState {
     retainedEarnings: 0,
     doctorPlan: Object.fromEntries(configs.map((c) => [c.id, 0])),
     maintainIgyoku: true,
+    igyokuDuty: false,
     configs,
     goalAchievedAt: {},
     insolventMonths: 0,
@@ -225,6 +229,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       }
     }
     if (decision?.maintainIgyoku !== undefined) state.maintainIgyoku = decision.maintainIgyoku;
+    if (decision?.igyokuDuty !== undefined) state.igyokuDuty = decision.igyokuDuty;
 
     // 分院を開く。**開院月を state に足す**ので、以降このループが拾う
     if (decision?.openClinic && !state.configs.some((c) => c.id === decision.openClinic)) {
@@ -434,8 +439,10 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       state.personalAssets.push(assetId);
     }
 
-    // 関係値は維持費を払っていれば据え置き、払わなければ減衰する。上げるのは金ではない
-    const relationDelta = decision?.igyokuRelationDelta ?? 0;
+    // 関係値は維持費を払っていれば据え置き、払わなければ減衰する。上げるのは金ではない。
+    // 当直を出しているあいだは毎月少しずつ上がる（代償は診察枠）
+    const relationDelta =
+      (decision?.igyokuRelationDelta ?? 0) + (state.igyokuDuty ? IGYOKU_DUTY_GAIN_PER_MONTH : 0);
     state.igyokuRelation = Math.max(
       0,
       Math.min(
@@ -533,6 +540,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       nurseSufficiency,
       nursesFromSchool: nurseTick.fromSchool,
       nursesFromMarket: nurseTick.fromMarket,
+      igyokuDuty: state.igyokuDuty,
     };
 
     // ---------------------------------------------------------- 3. 診療報酬
@@ -585,7 +593,8 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
 
     const capacityMultiplier =
       relationCapacityMultiplier(relations, state.externalRelations.medicalAssociation) *
-      (1 - vendor.migrationCapacityPenalty);
+      (1 - vendor.migrationCapacityPenalty) *
+      (state.igyokuDuty ? 1 - IGYOKU_DUTY_CAPACITY_DRAG : 1);
     const newPatientMultiplier = 1 + relations.referralUplift;
     const selfPayMultiplier =
       relationSelfPayMultiplier(relations) * (1 + vendor.equipmentSelfPayUplift);

@@ -9,18 +9,18 @@
 | [`clinic`](screens/clinic.md) | 診療所 | `hq` | **実装済み** |
 | [`igyoku`](screens/igyoku.md) | 医局 | `igyoku` | **実装済み** |
 | [`agency`](screens/agency.md) | 紹介会社 | `agency` | **実装済み** |
-| [`medicalAssociation`](screens/medicalAssociation.md) | 地域医師会 | `shikai` | 未着手 |
-| [`referralHospital`](screens/referralHospital.md) | 連携基幹病院 | `hospital` | 未着手 |
-| [`careManager`](screens/careManager.md) | ケアマネ・地域包括 | `hospital` | 未着手 |
+| [`medicalAssociation`](screens/medicalAssociation.md) | 地域医師会 | `shikai` | **実装済み** |
+| [`referralHospital`](screens/referralHospital.md) | 連携基幹病院 | `hospital` | **実装済み** |
+| [`careManager`](screens/careManager.md) | ケアマネ・地域包括 | `hospital` | **実装済み** |
 | [`bureau`](screens/bureau.md) | 厚生局 | `bureau` | **実装済み** |
-| [`pharmacy`](screens/pharmacy.md) | 門前薬局 | `pharmacy` | 未着手 |
+| [`pharmacy`](screens/pharmacy.md) | 門前薬局 | `pharmacy` | **実装済み** |
 | [`nursingSchool`](screens/nursingSchool.md) | 看護学校 | `school` | **実装済み** |
-| [`vendor`](screens/vendor.md) | システム・機器商社 | `vendor` | 未着手 |
 | [`bank`](screens/bank.md) | 銀行 | `bank` | **実装済み** |
-| [`realEstate`](screens/realEstate.md) | 不動産 | `bank` | 未着手 |
+| [`realEstate`](screens/realEstate.md) | 不動産 | `bank` | **実装済み** |
 | [`accounting`](screens/accounting.md) | 経理 | `hq` | **実装済み** |
 | [`personnel`](screens/personnel.md) | 人事 | `hq` | **実装済み** |
-| [`personalWealth`](screens/personalWealth.md) | 個人資産 | `hq` | 未着手 |
+| [`personalWealth`](screens/personalWealth.md) | 個人資産 | `hq` | **実装済み** |
+| [`vendor`](screens/vendor.md) | システム・機器商社 | `vendor` | **実装済み** |
 
 ## 実装の順序
 
@@ -33,21 +33,43 @@
 
 `clinic` が面白くなければ残りを作っても面白くならない。ここで止まる勇気を持つこと。
 
-## 未着手の6画面について
+## 全画面が実装済み
 
-残りは**シム核に対応するデータが一切無い**。作るには検証されていないゲーム機構を
-新規に設計することになる。画面の問題ではなく、**モデルの問題**。
+15画面すべてに中身がある。`test/screens.test.ts` が
+**台帳（registry）と中身の対応**を検証しているので、
+新しい ScreenId を足して台帳に書き忘れると試験が落ちる。
 
-| 画面 | 何が無いか | 入れるなら先に決めること |
-|---|---|---|
-| 地域医師会 | 医師会という主体が無い | 何を差し出すと何が返るのか。関係値をもう1本増やす価値があるか |
-| 連携基幹病院 | 紹介・逆紹介が無い | 紹介率が患者ストックにどう効くか。評判との違い |
-| ケアマネ・地域包括 | 在宅の患者区分が無い | 外来と在宅を分けるのか。分けると患者ストックが2本になる |
-| 門前薬局 | 賃料収入の口だけある（`rentalRevenue` は常に0） | 薬局を建てるのか誘致するのか。建てるなら不動産と重なる |
-| システム・機器商社 | 定数だけある（`EMR_TIERS` / `AI_TOOLS`）。シミュレーションは無い | カルテ移行の枠低下を engine に通すか。**ここは通せば効く** |
-| 不動産・個人資産 | 法人と個人の区別が無い | 個人資産を持つと役員報酬の判断が要る。ゲームが2階建てになる |
+## 操作を持つ画面と、読むだけの画面
 
-**このうち「システム・機器商社」だけは既に定数が置いてあり、
-カルテ移行のペナルティを engine に通すだけで成立する**（`migrationCapacityPenalty`）。
-診察枠が落ちる → 待ち時間 → 評判 → 1年後に患者ストック、という検証済みの経路を
-そのまま通るので、新しい因果を発明しなくてよい。次に作るならここ。
+| 操作を持つ | 何を決めるか |
+|---|---|
+| 診療所 | 常勤医の増減 |
+| マップ | 分院を開く・月を進める |
+| 医局 | 維持費の支払い・当直の派遣 |
+| 紹介会社 | 枠の確保 |
+| 看護学校 | 開校 |
+| 厚生局 | 加算の取得 |
+| 銀行 | 借入 |
+| 地域医師会・連携基幹病院・ケアマネ | 活動の継続 |
+| 門前薬局 | 誘致 |
+| 機器商社 | カルテ移行・機器・AI・保守 |
+| 不動産 | 物件の取得 |
+| 個人資産 | 役員報酬・見栄資産 |
+
+| 読むだけ | 理由 |
+|---|---|
+| 本社 | 全社の現在地。意思決定はそれぞれの建物で行う |
+| 経理 | 三表。結果を読む場所 |
+| 人事 | 医師の配置は診療所画面（そこでしか結果が見えない） |
+
+**操作は「結果が見える場所」に置く。** 医師の増減を人事画面に置かないのは、
+待ち時間と患者ストックが診療所画面にしかないから。
+
+## 月の進め方
+
+★**未来は見せない。** `currentMonth` までしか表示せず、
+意思決定は `currentMonth` にしか書けない。過去へは戻れるが読むだけ。
+
+このゲームの主題は遅延（壊すのは一瞬、直すのは何年）で、
+120ヶ月目を見てから13ヶ月目に戻れるなら判断そのものが要らなくなる。
+終局したあとはタイムラインを開放する。因果の確認は終わってからでいい。

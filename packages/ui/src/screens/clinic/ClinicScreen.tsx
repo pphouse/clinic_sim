@@ -53,7 +53,11 @@ export interface ClinicScreenProps {
   onTabChange: (tab: ClinicTabId) => void;
   onClose: () => void;
   /** 操作系。sim の意思決定リストを書き換える */
-  onDoctorsChange: (next: number) => void;
+  /**
+   * 常勤医を動かす。**過去の月を見ているあいだは undefined。**
+   * 決められるのは「今」だけで、過ぎた月は読むだけ（App.tsx）。
+   */
+  onDoctorsChange?: (next: number) => void;
   onMonthChange: (delta: number) => void;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -525,7 +529,7 @@ function ControlDock(
           常勤医
         </span>
         <span style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-mute)' }}>
-          動かすと以後の月がすべて計算し直される
+          {props.onDoctorsChange ? '動かすと以後の月がすべて計算し直される' : '過ぎた月は読むだけ'}
         </span>
       </div>
       <div className="stepper">
@@ -533,8 +537,8 @@ function ControlDock(
             label="常勤医を減らす"
             tone="primary"
             icon={<MinusIcon size={22} />}
-            disabled={!props.opened || props.doctors <= 0}
-            onClick={() => props.onDoctorsChange(props.doctors - 1)}
+            disabled={!props.opened || props.doctors <= 0 || !props.onDoctorsChange}
+            onClick={() => props.onDoctorsChange?.(props.doctors - 1)}
           />
           <span
             key={props.doctors}
@@ -548,8 +552,8 @@ function ControlDock(
             label="常勤医を増やす"
             tone="primary"
             icon={<PlusIcon size={22} />}
-            disabled={!props.opened}
-            onClick={() => props.onDoctorsChange(props.doctors + 1)}
+            disabled={!props.opened || !props.onDoctorsChange}
+            onClick={() => props.onDoctorsChange?.(props.doctors + 1)}
           />
       </div>
 

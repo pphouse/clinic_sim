@@ -8,6 +8,7 @@
  * だから ScreenShell（閉じるボタンと領域色を前提にした器）は使わない。
  */
 import {
+  CLINIC_SITES,
   MONTHS_PER_YEAR,
   clinicSummaries,
   groupSummary,
@@ -15,9 +16,11 @@ import {
   reputationStars,
   type ClinicId,
   type ClinicSummary,
+  type MonthDecision,
   type MonthResult,
   type ScreenId,
 } from '@med/sim';
+import { GoalBar } from '../../components/GoalBar';
 import { IconButton } from '../../components/IconButton';
 import { StarRating } from '../../components/StarRating';
 import {
@@ -38,6 +41,8 @@ const MAP_POSITIONS: Record<ClinicId, { left: string; top: string }> = {
   A: { left: '30%', top: '34%' },
   B: { left: '66%', top: '52%' },
   C: { left: '42%', top: '73%' },
+  D: { left: '55%', top: '30%' },
+  E: { left: '22%', top: '62%' },
 };
 
 const CONGESTION_COLOR = {
@@ -52,6 +57,16 @@ export interface MapScreenProps {
   onOpenClinic: (id: ClinicId) => void;
   onOpenBuilding: (id: ScreenId) => void;
   onMonthChange: (delta: number) => void;
+  /** どこまで進めたか。ここより先は見られない */
+  currentMonth: number;
+  /** 「今」を見ているか。過去を見ているあいだは進めるボタンを出さない */
+  isPresent: boolean;
+  /** 1ヶ月進める */
+  onAdvance: () => void;
+  /** 終局後だけ。結果画面へ戻る */
+  onShowEnding?: () => void;
+  /** 今月の意思決定。過去を見ているあいだは undefined */
+  onDecision?: (patch: Partial<MonthDecision>) => void;
   canGoBack: boolean;
   canGoForward: boolean;
 }
@@ -60,6 +75,10 @@ export function MapScreen(props: MapScreenProps) {
   const { result, previous } = props;
   const summaries = clinicSummaries(result);
   const group = groupSummary(result, previous);
+  const cash = result.financials.balanceSheet.cash;
+  // まだ開いていない候補地。**開けるものだけを出す**のではなく、
+  // 足りない額まで見せる。「いくら足りないか」が次の判断になる
+  const sites = CLINIC_SITES.filter((site) => !summaries.some((c) => c.id === site.id));
 
   return (
     <div
@@ -104,6 +123,14 @@ export function MapScreen(props: MapScreenProps) {
         </div>
       </header>
 
+      {/*
+        ★何を目指しているかを常に見せる。見えていないと月を進める意味が分からない。
+        3本並べるのは選ばせるためではなく、**1本伸ばすと他が縮むのが見える**ようにするため。
+      */}
+      <div style={{ flexShrink: 0, borderBottom: '1px solid var(--ink-700)' }}>
+        <GoalBar goals={result.goals.goals} onOpen={() => props.onOpenBuilding('personalWealth')} />
+      </div>
+
       <div
         style={{
           flex: 1,
@@ -142,6 +169,66 @@ export function MapScreen(props: MapScreenProps) {
               onOpen={() => props.onOpenClinic(clinic.id)}
             />
           ))}
+
+          {props.onDecision && sites.length > 0 && (
+            <>
+              <h2
+                style={{
+                  margin: 'var(--space-6) 0 var(--space-2)',
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 'var(--text-label)',
+                  fontWeight: 600,
+                  color: 'var(--paper-dim)',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                開院できる候補地
+              </h2>
+              {sites.map((site) => {
+                const short = site.capex - cash;
+                return (
+                  <div
+                    key={site.id}
+                    className="receipt-rule"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr auto',
+                      gap: 'var(--space-3)',
+                      alignItems: 'center',
+                      padding: 'var(--space-3) 0',
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 'var(--text-body)' }}>{site.name}</div>
+                      <div
+                        style={{
+                          fontSize: 'var(--text-caption)',
+                          color: 'var(--paper-mute)',
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {compactMan(site.capex)}円
+                        {site.initialPatientStock > 0 &&
+                          `・${people(site.initialPatientStock)}人を引き継ぐ`}
+                        <br />
+                        {site.character}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      data-testid={`open-site-${site.id}`}
+                      disabled={short > 0}
+                      onClick={() => props.onDecision?.({ openClinic: site.id })}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {short > 0 ? `${compactMan(short)}円 不足` : '開く'}
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          )}
 
           {/*
             訪問先。**ここに出ている建物だけが実装済み。**
@@ -206,6 +293,11 @@ export function MapScreen(props: MapScreenProps) {
         </div>
       </div>
 
+      {/*
+        操作卓。**「翌月へ」がこのゲームの唯一の不可逆な操作。**
+        押すと1ヶ月が確定して、その月の意思決定は書き換えられなくなる。
+        過去へは戻れるが、読むだけ（docs/spec/screens/map.md）。
+      */}
       <div
         style={{
           flexShrink: 0,
@@ -236,33 +328,64 @@ export function MapScreen(props: MapScreenProps) {
             onClick={() => props.onMonthChange(-1)}
           />
         </div>
-        <div
-          style={{
-            textAlign: 'center',
-            fontFamily: 'var(--font-display)',
-            fontSize: 17,
-            fontWeight: 600,
-            letterSpacing: '0.02em',
-          }}
-        >
-          {monthLabel(result.month)}
+
+        <div style={{ textAlign: 'center', minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 17,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {monthLabel(result.month)}
+          </div>
+          {!props.isPresent && (
+            <div style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-mute)' }}>
+              {props.onShowEnding ? '10年の見直し' : `過去（今は ${monthLabel(props.currentMonth)}）`}
+            </div>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
-          <IconButton
-            label="次の月へ"
-            tone="quiet"
-            icon={<ChevronRightIcon size={19} />}
-            disabled={!props.canGoForward}
-            onClick={() => props.onMonthChange(1)}
-          />
-          <IconButton
-            label="1年進む"
-            tone="quiet"
-            icon={<ChevronsRightIcon size={19} />}
-            disabled={!props.canGoForward}
-            onClick={() => props.onMonthChange(MONTHS_PER_YEAR)}
-          />
-        </div>
+
+        {props.isPresent ? (
+          <button
+            type="button"
+            className="btn btn--primary"
+            data-testid="advance"
+            onClick={props.onAdvance}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            翌月へ
+          </button>
+        ) : props.onShowEnding ? (
+          <button
+            type="button"
+            className="btn"
+            data-testid="show-ending"
+            onClick={props.onShowEnding}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            結果へ
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+            <IconButton
+              label="次の月へ"
+              tone="quiet"
+              icon={<ChevronRightIcon size={19} />}
+              disabled={!props.canGoForward}
+              onClick={() => props.onMonthChange(1)}
+            />
+            <IconButton
+              label="今へ戻る"
+              tone="quiet"
+              icon={<ChevronsRightIcon size={19} />}
+              disabled={!props.canGoForward}
+              onClick={() => props.onMonthChange(MONTHS_PER_YEAR)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

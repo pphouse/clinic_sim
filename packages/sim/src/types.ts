@@ -101,6 +101,8 @@ export interface StaffTick {
   nurseSufficiency: number;
   nursesFromSchool: number;
   nursesFromMarket: number;
+  /** 医局へ当直を出しているか。出していると関係が育つ代わりに枠が落ちる */
+  igyokuDuty: boolean;
 }
 
 // ---------------------------------------------------------------- 診療報酬

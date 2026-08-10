@@ -15,7 +15,11 @@ import type { ReactNode } from 'react';
 import {
   ADDONS,
   AGENCY_FEE_PER_DOCTOR,
+  BANK_LEVERAGE_LIMIT,
+  BANK_LOAN_UNIT,
   FEE_REVISIONS,
+  IGYOKU_DUTY_GAIN_PER_MONTH,
+  SCHOOL_CAPEX,
   NURSES_PER_DOCTOR,
   NURSE_MARKET_HIRES_PER_MONTH,
   RELATION_PER_IGYOKU_SLOT,
@@ -151,6 +155,11 @@ export interface Body {
    */
   dock?: ReactNode | ((tab: string) => ReactNode);
   render: (tab: string) => ReactNode;
+}
+
+/** 操作卓の1行。1行に最大2つまで。親指の届く範囲に置く（CLAUDE.md §5） */
+function DockRow({ children }: { children: ReactNode }) {
+  return <div style={{ display: 'flex', gap: 'var(--space-2)' }}>{children}</div>;
 }
 
 const textTab = (id: string, label: string): ShellTab => ({
@@ -475,13 +484,36 @@ const personnelBody = ({ result }: BuildingScreenProps): Body => {
 // 医局
 // ==================================================================
 
-const igyokuBody = ({ result }: BuildingScreenProps): Body => {
+const igyokuBody = ({ result, onDecision }: BuildingScreenProps): Body => {
   const staff = result.staff;
   const is = result.financials.incomeStatement;
   const toNextSlot =
     (staff.igyokuSlots + 1) * RELATION_PER_IGYOKU_SLOT - staff.igyokuRelation;
+  const maintaining = is.igyokuRelationCost > 0;
   return {
-    greeting: `関係値は ${staff.igyokuRelation}。派遣枠は ${staff.igyokuSlots} です。`,
+    greeting: staff.igyokuDuty
+      ? `当直に出ていただいている分、関係値は毎月 ${IGYOKU_DUTY_GAIN_PER_MONTH} 上がります。`
+      : `関係値は ${staff.igyokuRelation}。派遣枠は ${staff.igyokuSlots} です。`,
+    dock: onDecision && (
+      <DockRow>
+        <button
+          type="button"
+          className={maintaining ? 'btn btn--quiet' : 'btn'}
+          style={{ flex: 1 }}
+          onClick={() => onDecision({ maintainIgyoku: !maintaining })}
+        >
+          {maintaining ? '維持費を止める' : '維持費を払う'}
+        </button>
+        <button
+          type="button"
+          className={staff.igyokuDuty ? 'btn btn--quiet' : 'btn btn--primary'}
+          style={{ flex: 1 }}
+          onClick={() => onDecision({ igyokuDuty: !staff.igyokuDuty })}
+        >
+          {staff.igyokuDuty ? '当直をやめる' : '当直を出す'}
+        </button>
+      </DockRow>
+    ),
     render: () => (
       <>
         <HeroRow>
@@ -541,10 +573,22 @@ const igyokuBody = ({ result }: BuildingScreenProps): Body => {
 // 紹介会社
 // ==================================================================
 
-const agencyBody = ({ result }: BuildingScreenProps): Body => {
+const agencyBody = ({ result, onDecision }: BuildingScreenProps): Body => {
   const staff = result.staff;
   const is = result.financials.incomeStatement;
   return {
+    dock: onDecision && (
+      <DockRow>
+        <button
+          type="button"
+          className="btn btn--primary"
+          style={{ flex: 1 }}
+          onClick={() => onDecision({ agencyHires: 1 })}
+        >
+          枠を1つ確保する（{man(AGENCY_FEE_PER_DOCTOR)}万円）
+        </button>
+      </DockRow>
+    ),
     greeting:
       is.agencyFees > 0
         ? `今月 ${man(is.agencyFees)}万円で枠を確保しました。`
@@ -582,10 +626,22 @@ const agencyBody = ({ result }: BuildingScreenProps): Body => {
 // 看護学校
 // ==================================================================
 
-const schoolBody = ({ result, history }: BuildingScreenProps): Body => {
+const schoolBody = ({ result, history, onDecision }: BuildingScreenProps): Body => {
   const school = schoolStatus(history, result.month);
   const is = result.financials.incomeStatement;
   return {
+    dock: onDecision && !school.open && (
+      <DockRow>
+        <button
+          type="button"
+          className="btn btn--primary"
+          style={{ flex: 1 }}
+          onClick={() => onDecision({ openSchool: true })}
+        >
+          開校する（{compactMan(SCHOOL_CAPEX)}円・卒業は3年後）
+        </button>
+      </DockRow>
+    ),
     greeting: school.open
       ? school.graduatedThisMonth > 0
         ? `今月 ${school.graduatedThisMonth.toFixed(1)}名が入職しました。`
@@ -642,11 +698,28 @@ const schoolBody = ({ result, history }: BuildingScreenProps): Body => {
 // 銀行
 // ==================================================================
 
-const bankBody = ({ result }: BuildingScreenProps): Body => {
+const bankBody = ({ result, onDecision }: BuildingScreenProps): Body => {
   const bs = result.financials.balanceSheet;
   const cf = result.financials.cashFlow;
   const is = result.financials.incomeStatement;
+  // 借りられる余地。純資産の BANK_LEVERAGE_LIMIT 倍まで。債務超過なら 0
+  const room = Math.max(0, bs.totalEquity * BANK_LEVERAGE_LIMIT - totalDebt(result));
   return {
+    dock: onDecision && (
+      <DockRow>
+        <button
+          type="button"
+          className="btn btn--primary"
+          style={{ flex: 1 }}
+          disabled={room < BANK_LOAN_UNIT}
+          onClick={() => onDecision({ borrow: BANK_LOAN_UNIT })}
+        >
+          {room < BANK_LOAN_UNIT
+            ? '融資枠がありません'
+            : `${compactMan(BANK_LOAN_UNIT)}円を借りる`}
+        </button>
+      </DockRow>
+    ),
     greeting:
       bs.totalEquity < 0
         ? '純資産がマイナスです。これ以上の融資は難しい。'
@@ -717,12 +790,34 @@ const bankBody = ({ result }: BuildingScreenProps): Body => {
 // 厚生局
 // ==================================================================
 
-const bureauBody = ({ result }: BuildingScreenProps): Body => {
+const bureauBody = ({ result, onDecision }: BuildingScreenProps): Body => {
   const fee = result.fee;
   const staff = result.staff;
   const lapsed = fee.addons.filter((a) => a.lapsedByRequirement);
   const revision = FEE_REVISIONS.find((r) => r.effectiveMonth === result.month);
+  // 次に取れる加算。**要件を満たしているものだけ出す**。
+  // 取れないものを押せる形で並べると、押してから断られることになる
+  const next = ADDONS.find((a) => {
+    const status = fee.addons.find((s) => s.id === a.id);
+    return (
+      !status?.acquired &&
+      staff.doctorsTotal >= a.requiredDoctors &&
+      staff.nurseSufficiency >= a.requiredNurseSufficiency
+    );
+  });
   return {
+    dock: onDecision && next !== undefined && (
+      <DockRow>
+        <button
+          type="button"
+          className="btn btn--primary"
+          style={{ flex: 1 }}
+          onClick={() => onDecision({ acquireAddons: [next.id] })}
+        >
+          {next.name}を取得（{man(next.acquisitionCost)}万円）
+        </button>
+      </DockRow>
+    ),
     greeting: revision
       ? `${revision.name}が施行されました。基礎点数が ${(revision.rate * 100).toFixed(1)}% です。`
       : lapsed.length > 0
@@ -809,6 +904,16 @@ const bureauBody = ({ result }: BuildingScreenProps): Body => {
     ),
   };
 };
+
+/**
+ * 中身を持つ画面の一覧。**マップの台帳（registry）と突き合わせる**ために出している。
+ * 札はあるのに開くと真っ白、を試験で拾えるようにする（test/screens.test.ts）。
+ */
+export const SCREEN_BODY_IDS: ScreenId[] = [
+  'hq', 'accounting', 'personnel', 'igyoku', 'agency', 'nursingSchool', 'bank', 'bureau',
+  'medicalAssociation', 'referralHospital', 'careManager', 'pharmacy', 'vendor',
+  'realEstate', 'personalWealth',
+];
 
 const BODIES: Partial<Record<ScreenId, (props: BuildingScreenProps) => Body>> = {
   hq: hqBody,

@@ -531,6 +531,16 @@ export const CLINIC_SITES: ClinicSite[] = [
   },
 ];
 
+// --- 医局への当直派遣
+//
+// 関係値を上げる手段。**金では買えない**（IGYOKU_RELATION_COST_PER_MONTH は
+// 下がらないようにするための費用であって、上げるためのものではない）。
+// 代わりに診察枠を差し出す。外部関係と同じ「続けると育ち、やめると止まる」形。
+/** 当直を引き受けている月の関係値の上昇 */
+export const IGYOKU_DUTY_GAIN_PER_MONTH = 1;
+/** そのあいだ落ちる診察枠。医師が大学の当直に出ている分 */
+export const IGYOKU_DUTY_CAPACITY_DRAG = 0.05;
+
 // --- 銀行（プレイヤーが引く借入）
 /** 1回に引ける額 */
 export const BANK_LOAN_UNIT = 5000;

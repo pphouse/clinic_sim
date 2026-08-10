@@ -66,6 +66,11 @@ export interface MonthDecision {
   openClinic?: ClinicId;
   /** 銀行から引く額（万円）。純資産の BANK_LEVERAGE_LIMIT 倍を超えると断られる */
   borrow?: Man;
+  /**
+   * 医局へ当直を出すか。続けているあいだ関係値が上がり、診察枠が落ちる。
+   * **金では買えない関係を、枠で買う。**
+   */
+  igyokuDuty?: boolean;
 }
 
 /**

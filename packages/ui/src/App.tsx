@@ -1,76 +1,133 @@
 /**
- * プロトタイプの器。
+ * ゲームの器。
  *
- * 実装済みの画面はマップと診療所。マップが根で、診療所は全画面差し替えのモーダル。
- * 本社も医局も銀行もまだ無い（仕様の無い画面は実装しない。CLAUDE.md §7）。
+ * ★ここが「ビューア」と「ゲーム」を分けている場所。
  *
- * ★重要：意思決定を変えると、120ヶ月を丸ごと計算し直している。
- * シム核は純粋関数なので差分更新は要らないし、やってはいけない。
- * 「13ヶ月目の医師を1名戻す」を押した瞬間に、10年ぶんの未来が正しく組み替わる。
+ * 以前はいきなり120ヶ月を計算して、タイムラインを自由に行き来していた。
+ * それでは**このゲームの主題である遅延が痛みにならない。**
+ * 120ヶ月目を見てから13ヶ月目に戻って医師を戻せるなら、判断は要らない。
+ *
+ * いまは：
+ *   - `currentMonth` までしか見られない。**未来は見せない**
+ *   - 意思決定は `currentMonth` にしか書けない。過去は読むだけ
+ *   - 「翌月へ」で1ヶ月ずつ進める
+ *   - 終わったらタイムラインを開放する（因果を確認するのは終わってからでいい）
+ *
+ * 計算は毎回120ヶ月まるごとやり直している。差分更新はしないし、してはいけない。
+ * シム核は純粋関数なので、決定を1つ足せば10年ぶんの未来が正しく組み替わる。
+ * 見せる範囲だけを currentMonth で切っている。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  BASELINE_SCENARIO,
-  CLINICS,
+  PLAY_SCENARIO,
+  createSave,
   runSimulation,
+  scenarioFromSave,
   type ClinicId,
+  type Month,
   type MonthDecision,
+  type SaveData,
   type ScreenId,
 } from '@med/sim';
 import { ClinicScreen, type ClinicTabId } from './screens/clinic/ClinicScreen';
 import { MapScreen } from './screens/map/MapScreen';
 import { BuildingScreen } from './screens/buildings/BuildingScreens';
+import { EndingScreen } from './screens/ending/EndingScreen';
+import { clearSave, loadSave, writeSave } from './game/storage';
+
+const freshSave = (): SaveData => createSave(PLAY_SCENARIO, 1, PLAY_SCENARIO.decisions);
 
 export function App() {
-  const [decisions, setDecisions] = useState<MonthDecision[]>(BASELINE_SCENARIO.decisions);
-  const [month, setMonth] = useState(1);
+  const [save, setSave] = useState<SaveData>(() => loadSave() ?? freshSave());
+  /** 見ている月。currentMonth を超えられない（終局後を除く） */
+  const [viewMonth, setViewMonth] = useState<Month>(save.currentMonth);
   const [tab, setTab] = useState<ClinicTabId>('overview');
-  /** 開いている診療所。null ならマップか建物 */
   const [openClinic, setOpenClinic] = useState<ClinicId | null>(null);
-  /** 開いている建物。null なら診療所かマップ */
   const [openBuilding, setOpenBuilding] = useState<ScreenId | null>(null);
+  /** 終局の画面を出しているか。「見直す」で伏せる */
+  const [endingDismissed, setEndingDismissed] = useState(false);
 
-  const run = useMemo(
-    () => runSimulation({ ...BASELINE_SCENARIO, decisions }),
-    [decisions],
-  );
+  const run = useMemo(() => runSimulation(scenarioFromSave(PLAY_SCENARIO, save)), [save]);
 
-  const modified = decisions !== BASELINE_SCENARIO.decisions;
+  useEffect(() => writeSave(save), [save]);
+
+  const end = run.months[save.currentMonth - 1]!.goals.end;
+  /** 終わったらタイムラインを開放する。因果を確認するのは終わってからでいい */
+  const maxViewMonth = end.ended ? run.months.length : save.currentMonth;
+  const month = Math.min(viewMonth, maxViewMonth);
   const result = run.months[month - 1]!;
   const previous = month > 1 ? run.months[month - 2]! : null;
-  const clinicName = CLINICS.find((c) => c.id === openClinic)?.name ?? openClinic ?? '';
+  /** 過去を見ているあいだは意思決定を書けない。書けるのは「今」だけ */
+  const isPresent = month === save.currentMonth && !end.ended;
 
-  const changeMonth = (delta: number) =>
-    setMonth((m) => Math.min(run.months.length, Math.max(1, m + delta)));
+  const clinicName = result.clinics.find((c) => c.id === openClinic)?.name ?? openClinic ?? '';
+
+  function goToMonth(next: Month) {
+    setViewMonth(Math.min(maxViewMonth, Math.max(1, next)));
+  }
+
+  /** 1ヶ月進める。**押した瞬間に確定して、戻せない** */
+  function advance() {
+    if (end.ended || save.currentMonth >= run.months.length) return;
+    const next = save.currentMonth + 1;
+    setSave((s) => ({ ...s, currentMonth: next }));
+    setViewMonth(next);
+  }
 
   /**
-   * 表示中の月の意思決定を書き換える。以後の月にも効く（意思決定は据え置きが既定）。
-   *
-   * その月に既に意思決定があれば上書き、無ければ挿して月順に並べ直す。
-   * **差分更新はしない。** シム核は純粋関数なので、押した瞬間に120ヶ月を丸ごと
-   * 計算し直すのが正しい（そうしないと「1年後」が古いままになる）。
+   * 今月の意思決定を書き換える。以後の月にも効く（意思決定は据え置きが既定）。
+   * **書けるのは currentMonth だけ。** 過去は読むだけ。
    */
   function applyDecision(patch: Partial<MonthDecision>) {
-    setDecisions((current) => {
-      const index = current.findIndex((d) => d.month === month);
+    if (!isPresent) return;
+    setSave((s) => {
+      const target = s.currentMonth;
+      const index = s.decisions.findIndex((d) => d.month === target);
       if (index >= 0) {
-        const updated = [...current];
-        const target = current[index]!;
+        const updated = [...s.decisions];
+        const existing = s.decisions[index]!;
         updated[index] = {
-          ...target,
+          ...existing,
           ...patch,
-          // 医師配置と外部関係は「書いた分だけ」上書きする。丸ごと置き換えない
-          doctorsByClinic: { ...target.doctorsByClinic, ...patch.doctorsByClinic },
-          relationActivity: { ...target.relationActivity, ...patch.relationActivity },
+          // 書いた分だけ上書きする。丸ごと置き換えない
+          doctorsByClinic: { ...existing.doctorsByClinic, ...patch.doctorsByClinic },
+          relationActivity: { ...existing.relationActivity, ...patch.relationActivity },
         };
-        return updated;
+        return { ...s, decisions: updated };
       }
-      return [...current, { month, ...patch }].sort((a, b) => a.month - b.month);
+      return {
+        ...s,
+        decisions: [...s.decisions, { month: target, ...patch }].sort((a, b) => a.month - b.month),
+      };
     });
+  }
+
+  function restart() {
+    clearSave();
+    const next = freshSave();
+    setSave(next);
+    setViewMonth(next.currentMonth);
+    setEndingDismissed(false);
+    setOpenClinic(null);
+    setOpenBuilding(null);
   }
 
   const setDoctors = (clinicId: ClinicId, next: number) =>
     applyDecision({ doctorsByClinic: { [clinicId]: next } });
+
+  if (end.ended && !endingDismissed) {
+    return (
+      <EndingScreen
+        end={end}
+        goals={run.months[end.month! - 1]!.goals.goals}
+        onReview={() => {
+          setEndingDismissed(true);
+          setViewMonth(1);
+        }}
+        onRestart={restart}
+      />
+    );
+  }
 
   if (openBuilding !== null) {
     return (
@@ -80,7 +137,7 @@ export function App() {
         previous={previous}
         history={run.months}
         onClose={() => setOpenBuilding(null)}
-        onDecision={applyDecision}
+        onDecision={isPresent ? applyDecision : undefined}
       />
     );
   }
@@ -92,9 +149,14 @@ export function App() {
         previous={previous}
         onOpenClinic={setOpenClinic}
         onOpenBuilding={setOpenBuilding}
-        onMonthChange={changeMonth}
+        onMonthChange={(delta) => goToMonth(month + delta)}
+        currentMonth={save.currentMonth}
+        isPresent={isPresent}
+        onAdvance={advance}
+        onShowEnding={end.ended ? () => setEndingDismissed(false) : undefined}
+        onDecision={isPresent ? applyDecision : undefined}
         canGoBack={month > 1}
-        canGoForward={month < run.months.length}
+        canGoForward={month < maxViewMonth}
       />
     );
   }
@@ -109,12 +171,12 @@ export function App() {
       tab={tab}
       onTabChange={setTab}
       onClose={() => setOpenClinic(null)}
-      onDoctorsChange={(next) => setDoctors(openClinic, next)}
-      onMonthChange={changeMonth}
+      onDoctorsChange={isPresent ? (next) => setDoctors(openClinic, next) : undefined}
+      onMonthChange={(delta) => goToMonth(month + delta)}
       canGoBack={month > 1}
-      canGoForward={month < run.months.length}
-      modified={modified}
-      onReset={() => setDecisions(BASELINE_SCENARIO.decisions)}
+      canGoForward={month < maxViewMonth}
+      modified={false}
+      onReset={restart}
     />
   );
 }
