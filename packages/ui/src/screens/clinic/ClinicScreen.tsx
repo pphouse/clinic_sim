@@ -248,7 +248,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
     <ScreenShell
       domain="hq"
       title={props.clinicName}
-      subtitle={`${monthLabel(result.month)}　東京都文京区本郷`}
+      subtitle={`${monthLabel(result.month)}　${clinic.specialtyName}`}
       icon={<ClinicIcon />}
       illustration={<ClinicIllustration crowding={clinic.utilization} />}
       portrait={<ManagerPortrait />}
@@ -450,7 +450,9 @@ export function ClinicScreen(props: ClinicScreenProps) {
 
           {props.tab === 'market' && district && (
             <>
-              <SectionTitle>{district.name}の取り合い</SectionTitle>
+              <SectionTitle>
+                {district.name}の{district.specialtyName}
+              </SectionTitle>
               <Note>
                 新規患者は<strong>商圏を独占したときの数にシェアを掛けた分</strong>だけ来る。
                 魅力は評判・待ち時間・医師数の3つで決まり、
@@ -544,7 +546,12 @@ export function ClinicScreen(props: ClinicScreenProps) {
               </div>
 
               <SectionTitle>自社の取り分</SectionTitle>
-              <StatRow label={`${district.name}のシェア`} value={percent(district.ownShare, 0)} unit="%" total />
+              <StatRow
+            label={`${district.name}の${district.specialtyName}のシェア`}
+            value={percent(district.ownShare, 0)}
+            unit="%"
+            total
+          />
               <StatRow label="今月の新規患者" value={people(clinic.newPatients)} unit="人" />
               <Note>
                 競合を <strong>18ヶ月続けて 30% 未満</strong>に押し込むと撤退する。

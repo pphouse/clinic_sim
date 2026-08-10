@@ -24,6 +24,8 @@ import type {
   FeeRevision,
   GoalSpec,
   Man,
+  SpecialtyId,
+  SpecialtySpec,
 } from './types';
 
 export const MONTHS_PER_YEAR = 12;
@@ -141,6 +143,93 @@ export const CORPORATE_TAX_RATE = 0.3;
  * 検証モデルの3院は別々の商圏に置いてある。食い合いが起きないので数字が動かない。
  */
 /**
+ * 診療科。★**内科は検証済みの定数そのもの。** 倍率ではなく実数で書く。
+ * 既定シナリオは全て内科なので、科を足しても検証済みの数字は動かない。
+ * docs/spec/05-specialty.md
+ */
+export const SPECIALTIES: SpecialtySpec[] = [
+  {
+    id: 'naika',
+    name: '内科',
+    visitsPerPatientPerMonth: VISITS_PER_PATIENT_PER_MONTH,
+    pointsPerVisit: POINTS_PER_VISIT,
+    visitsPerDoctorPerDay: VISITS_PER_DOCTOR_PER_DAY,
+    selfPayYenPerPatient: SELF_PAY_YEN_PER_PATIENT,
+    baseChurnRatePerQuarter: BASE_CHURN_RATE_PER_QUARTER,
+    capexMultiplier: 1,
+    doctorScarcity: 1,
+    character: '慢性疾患が中心。全ての基準になる科',
+  },
+  {
+    id: 'shonika',
+    name: '小児科',
+    // 単価は安いが、風邪でよく来るし診察が短い。**数で稼ぐ科**
+    visitsPerPatientPerMonth: VISITS_PER_PATIENT_PER_MONTH * 1.6,
+    pointsPerVisit: POINTS_PER_VISIT * 0.75,
+    visitsPerDoctorPerDay: VISITS_PER_DOCTOR_PER_DAY * 1.4,
+    selfPayYenPerPatient: SELF_PAY_YEN_PER_PATIENT * 0.6,
+    baseChurnRatePerQuarter: BASE_CHURN_RATE_PER_QUARTER * 1.6,
+    capexMultiplier: 0.9,
+    doctorScarcity: 1.3,
+    character: 'よく来るが単価が安い。子どもは成長して卒業していく',
+  },
+  {
+    id: 'seikei',
+    name: '整形外科',
+    visitsPerPatientPerMonth: VISITS_PER_PATIENT_PER_MONTH * 1.8,
+    pointsPerVisit: POINTS_PER_VISIT * 0.95,
+    visitsPerDoctorPerDay: VISITS_PER_DOCTOR_PER_DAY * 1.1,
+    selfPayYenPerPatient: SELF_PAY_YEN_PER_PATIENT * 0.8,
+    baseChurnRatePerQuarter: BASE_CHURN_RATE_PER_QUARTER * 1.2,
+    capexMultiplier: 1.6,
+    doctorScarcity: 1,
+    character: 'リハビリで通院が長い。患者1人の実入りは大きいが枠を食う',
+  },
+  {
+    id: 'hifuka',
+    name: '皮膚科',
+    visitsPerPatientPerMonth: VISITS_PER_PATIENT_PER_MONTH * 0.7,
+    pointsPerVisit: POINTS_PER_VISIT * 0.7,
+    visitsPerDoctorPerDay: VISITS_PER_DOCTOR_PER_DAY * 1.6,
+    selfPayYenPerPatient: SELF_PAY_YEN_PER_PATIENT * 3,
+    baseChurnRatePerQuarter: BASE_CHURN_RATE_PER_QUARTER * 1.5,
+    capexMultiplier: 1.1,
+    doctorScarcity: 1.1,
+    character: '回転が速く医師1人で多く抱えられる。保険は安いが自費で稼ぐ',
+  },
+  {
+    id: 'ganka',
+    name: '眼科',
+    visitsPerPatientPerMonth: VISITS_PER_PATIENT_PER_MONTH * 0.8,
+    pointsPerVisit: POINTS_PER_VISIT * 1.35,
+    visitsPerDoctorPerDay: VISITS_PER_DOCTOR_PER_DAY * 1.15,
+    selfPayYenPerPatient: SELF_PAY_YEN_PER_PATIENT * 1.5,
+    baseChurnRatePerQuarter: BASE_CHURN_RATE_PER_QUARTER,
+    capexMultiplier: 2,
+    doctorScarcity: 1.4,
+    character: '手術で単価が跳ねる。設備が重く、医師も採りにくい',
+  },
+  {
+    id: 'seishin',
+    name: '精神科',
+    visitsPerPatientPerMonth: VISITS_PER_PATIENT_PER_MONTH * 1.1,
+    // 1日に診られる数が少ないので、単価で釣り合わせないと医師1人あたりが赤字になる。
+    // 通院精神療法で再診の単価が高い、という実務の形と向きは合っている
+    pointsPerVisit: POINTS_PER_VISIT * 1.8,
+    visitsPerDoctorPerDay: VISITS_PER_DOCTOR_PER_DAY * 0.55,
+    selfPayYenPerPatient: SELF_PAY_YEN_PER_PATIENT * 0.5,
+    baseChurnRatePerQuarter: BASE_CHURN_RATE_PER_QUARTER * 0.5,
+    capexMultiplier: 0.5,
+    doctorScarcity: 1.6,
+    character: '診察が長く1日に診られる数が少ない。設備は要らず、患者は離れない',
+  },
+];
+
+export function specialtyOf(id: SpecialtyId): SpecialtySpec {
+  return SPECIALTIES.find((s) => s.id === id) ?? SPECIALTIES[0]!;
+}
+
+/**
  * ★ポテンシャルは「その商圏を独占したときの新規患者数」。
  *
  * 検証モデルの 150/130/110（四半期）は**競合が居る現実の中で A院が実際に得ていた数**で、
@@ -153,11 +242,42 @@ export const CORPORATE_TAX_RATE = 0.3;
  *   住宅地 110 × 100%（競合なし）= 110
  */
 export const DISTRICTS: DistrictSpec[] = [
-  { id: 'honmachi', name: '本町', newPatientPotential: 260 / MONTHS_PER_QUARTER },
-  { id: 'ekimae', name: '駅前', newPatientPotential: 350 / MONTHS_PER_QUARTER },
-  { id: 'jutaku', name: '住宅地', newPatientPotential: 110 / MONTHS_PER_QUARTER },
-  { id: 'shinko', name: '新興住宅地', newPatientPotential: 270 / MONTHS_PER_QUARTER },
+  {
+    id: 'honmachi',
+    name: '本町',
+    character: '古くからの下町。高齢の住民が多い',
+    newPatientPotential: 260 / MONTHS_PER_QUARTER,
+    demandBias: { naika: 1, shonika: 0.6, seikei: 1.4, hifuka: 0.8, ganka: 1.3, seishin: 0.7 },
+  },
+  {
+    id: 'ekimae',
+    name: '駅前',
+    character: '通勤で通る人が多い。人通りは多いが家賃も高い',
+    newPatientPotential: 350 / MONTHS_PER_QUARTER,
+    demandBias: { naika: 1, shonika: 0.7, seikei: 0.9, hifuka: 1.4, ganka: 0.8, seishin: 1.4 },
+  },
+  {
+    id: 'jutaku',
+    name: '住宅地',
+    character: '落ち着いた住宅地。子育て世帯が多い',
+    newPatientPotential: 110 / MONTHS_PER_QUARTER,
+    demandBias: { naika: 1, shonika: 1.6, seikei: 1, hifuka: 1.1, ganka: 0.9, seishin: 0.8 },
+  },
+  {
+    id: 'shinko',
+    name: '新興住宅地',
+    character: '若い世帯が増えている。伸びしろは大きい',
+    newPatientPotential: 270 / MONTHS_PER_QUARTER,
+    demandBias: { naika: 1, shonika: 1.5, seikei: 0.7, hifuka: 1.3, ganka: 0.6, seishin: 1 },
+  },
 ];
+
+/** その商圏でその科がどれだけ見込めるか。内科は全商圏 1.0 で校正どおり */
+export function districtDemand(districtId: string, specialtyId: SpecialtyId): number {
+  const district = DISTRICTS.find((d) => d.id === districtId);
+  if (!district) return 0;
+  return district.newPatientPotential * (district.demandBias[specialtyId] ?? 1);
+}
 
 /** 商圏のポテンシャル。分院の候補地とプレイ用の本院はここから引く */
 export function districtPotential(id: string): number {
@@ -165,9 +285,9 @@ export function districtPotential(id: string): number {
 }
 
 export const CLINICS: ClinicConfig[] = [
-  { id: 'A', name: 'A院（本院）', districtId: 'honmachi', openMonth: 1, newPatientPotential: 150 / MONTHS_PER_QUARTER, initialPatientStock: 3200 },
-  { id: 'B', name: 'B院', districtId: 'ekimae', openMonth: 19, newPatientPotential: 130 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
-  { id: 'C', name: 'C院', districtId: 'jutaku', openMonth: 43, newPatientPotential: 110 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
+  { id: 'A', name: 'A院（本院）', districtId: 'honmachi', specialtyId: 'naika', openMonth: 1, newPatientPotential: 150 / MONTHS_PER_QUARTER, initialPatientStock: 3200 },
+  { id: 'B', name: 'B院', districtId: 'ekimae', specialtyId: 'naika', openMonth: 19, newPatientPotential: 130 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
+  { id: 'C', name: 'C院', districtId: 'jutaku', specialtyId: 'naika', openMonth: 43, newPatientPotential: 110 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
 ];
 
 /** 改定は偶数年の4月に施行される。月1＝1年目4月なので、13・37・61…が4月にあたる */
@@ -592,8 +712,15 @@ export const DOCTOR_RESIGN_CHANCE = 0.005;
 /** 看護師の突発離職が起きる確率と、そのときに抜ける人数 */
 export const NURSE_EXODUS_CHANCE = 0.012;
 export const NURSE_EXODUS_COUNT = 3;
-/** 近隣に競合が開業する確率（商圏あたり月） */
-export const COMPETITOR_CHANCE = 0.005;
+/**
+ * 競合が開業する確率（自院1つあたり月）。
+ *
+ * ★**競合は儲かっているところに来る。** 患者数で重み付けして、
+ * 育っているセグメントに入ってくる（randomEvents.ts ③）。
+ * 商圏ごとの一様抽選にすると、空いた（商圏×科）を見つけて放置するのが
+ * 最適解になってしまう。10年のあいだ誰も来ないニッチは、ニッチではない。
+ */
+export const COMPETITOR_CHANCE = 0.008;
 /** 新しく開業する競合の強さの幅 */
 export const COMPETITOR_STRENGTH_MIN = 55;
 export const COMPETITOR_STRENGTH_MAX = 85;
@@ -631,10 +758,10 @@ export const CLINIC_SCALE_MAX = 2.5;
  * 住宅地は競合が居ないがポテンシャルが低い（110）。**楽な商圏は儲からない。**
  */
 export const INITIAL_COMPETITORS: CompetitorSpec[] = [
-  { id: 'honmachi-naika', name: '本町内科クリニック', districtId: 'honmachi', strength: 70 },
-  { id: 'ekimae-medical', name: '駅前メディカル', districtId: 'ekimae', strength: 82 },
-  { id: 'ekimae-sakura', name: 'さくら小児科', districtId: 'ekimae', strength: 64 },
-  { id: 'shinko-nijiiro', name: 'にじいろクリニック', districtId: 'shinko', strength: 58 },
+  { id: 'honmachi-naika', name: '本町内科クリニック', districtId: 'honmachi', specialtyId: 'naika', strength: 70 },
+  { id: 'ekimae-medical', name: '駅前メディカル', districtId: 'ekimae', specialtyId: 'naika', strength: 82 },
+  { id: 'ekimae-sakura', name: 'さくら小児科', districtId: 'ekimae', specialtyId: 'shonika', strength: 64 },
+  { id: 'shinko-nijiiro', name: 'にじいろクリニック', districtId: 'shinko', specialtyId: 'shonika', strength: 58 },
 ];
 /** 厚生局の個別指導。加算を多く持っているほど返還額が大きい */
 export const AUDIT_CHANCE = 0.008;

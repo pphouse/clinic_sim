@@ -10,6 +10,7 @@
 import {
   CLINIC_SITES,
   MONTHS_PER_YEAR,
+  districtNameOf,
   clinicSummaries,
   groupSummary,
   monthLabel,
@@ -90,6 +91,8 @@ export interface MapScreenProps {
   onShowEnding?: () => void;
   /** 今月の意思決定。過去を見ているあいだは undefined */
   onDecision?: (patch: Partial<MonthDecision>) => void;
+  /** 候補地を選んで開院画面へ。科はあちらで決める */
+  onChooseSite?: (id: ClinicId) => void;
   canGoBack: boolean;
   canGoForward: boolean;
 }
@@ -98,7 +101,6 @@ export function MapScreen(props: MapScreenProps) {
   const { result, previous } = props;
   const summaries = clinicSummaries(result);
   const group = groupSummary(result, previous);
-  const cash = result.financials.balanceSheet.cash;
   // まだ開いていない候補地。**開けるものだけを出す**のではなく、
   // 足りない額まで見せる。「いくら足りないか」が次の判断になる
   const sites = CLINIC_SITES.filter((site) => !summaries.some((c) => c.id === site.id));
@@ -198,7 +200,7 @@ export function MapScreen(props: MapScreenProps) {
             />
           ))}
 
-          {props.onDecision && sites.length > 0 && (
+          {props.onChooseSite && sites.length > 0 && (
             <>
               <h2
                 style={{
@@ -213,7 +215,7 @@ export function MapScreen(props: MapScreenProps) {
                 開院できる候補地
               </h2>
               {sites.map((site) => {
-                const short = site.capex - cash;
+                // 投資額は科で変わる（眼科は2倍、精神科は半分）。ここでは最小額を出す
                 return (
                   <div
                     key={site.id}
@@ -235,7 +237,7 @@ export function MapScreen(props: MapScreenProps) {
                           lineHeight: 1.5,
                         }}
                       >
-                        {compactMan(site.capex)}円
+                        {districtNameOf(site.districtId)}・{compactMan(site.capex)}円〜
                         {site.initialPatientStock > 0 &&
                           `・${people(site.initialPatientStock)}人を引き継ぐ`}
                         <br />
@@ -246,11 +248,10 @@ export function MapScreen(props: MapScreenProps) {
                       type="button"
                       className="btn btn--primary"
                       data-testid={`open-site-${site.id}`}
-                      disabled={short > 0}
-                      onClick={() => props.onDecision?.({ openClinic: site.id })}
+                      onClick={() => props.onChooseSite?.(site.id)}
                       style={{ whiteSpace: 'nowrap' }}
                     >
-                      {short > 0 ? `${compactMan(short)}円 不足` : '開く'}
+                      科を選ぶ
                     </button>
                   </div>
                 );

@@ -19,12 +19,15 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
+  CLINIC_SITES,
   PLAY_SCENARIO,
   createSave,
   runSimulation,
   scenarioFromSave,
   type ClinicId,
+  type ClinicSite,
   type Month,
+  type SpecialtyId,
   type MonthDecision,
   type SaveData,
   type ScreenId,
@@ -33,6 +36,7 @@ import { ClinicScreen, type ClinicTabId } from './screens/clinic/ClinicScreen';
 import { MapScreen } from './screens/map/MapScreen';
 import { BuildingScreen } from './screens/buildings/BuildingScreens';
 import { EndingScreen } from './screens/ending/EndingScreen';
+import { OpeningScreen } from './screens/opening/OpeningScreen';
 import { clearSave, loadSave, writeSave } from './game/storage';
 
 const freshSave = (): SaveData => createSave(PLAY_SCENARIO, 1, PLAY_SCENARIO.decisions);
@@ -46,6 +50,8 @@ export function App() {
   const [openBuilding, setOpenBuilding] = useState<ScreenId | null>(null);
   /** 終局の画面を出しているか。「見直す」で伏せる */
   const [endingDismissed, setEndingDismissed] = useState(false);
+  /** 開院画面で選んでいる候補地。科をここで決める */
+  const [openingSite, setOpeningSite] = useState<ClinicSite | null>(null);
 
   const run = useMemo(() => runSimulation(scenarioFromSave(PLAY_SCENARIO, save)), [save]);
 
@@ -129,6 +135,21 @@ export function App() {
     );
   }
 
+  if (openingSite !== null) {
+    return (
+      <OpeningScreen
+        site={openingSite}
+        result={result}
+        cash={result.financials.balanceSheet.cash}
+        onOpen={(specialty: SpecialtyId) => {
+          applyDecision({ openClinic: openingSite.id, openSpecialty: specialty });
+          setOpeningSite(null);
+        }}
+        onClose={() => setOpeningSite(null)}
+      />
+    );
+  }
+
   if (openBuilding !== null) {
     return (
       <BuildingScreen
@@ -155,6 +176,11 @@ export function App() {
         onAdvance={advance}
         onShowEnding={end.ended ? () => setEndingDismissed(false) : undefined}
         onDecision={isPresent ? applyDecision : undefined}
+        onChooseSite={
+          isPresent
+            ? (id) => setOpeningSite(CLINIC_SITES.find((s) => s.id === id) ?? null)
+            : undefined
+        }
         canGoBack={month > 1}
         canGoForward={month < maxViewMonth}
       />

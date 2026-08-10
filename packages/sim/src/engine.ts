@@ -45,6 +45,7 @@ import {
   YEN_PER_MAN,
   YEN_PER_POINT,
   monthlyFromQuarterly,
+  specialtyOf,
 } from './constants';
 import type { ClinicConfig, ClinicTick, Man, Month } from './types';
 
@@ -56,8 +57,12 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * extraVisitsPerDoctorPerDay は AI の上乗せ。**枠は増えるが施設基準の医師数には
  * 数えない**（constants.ts の AI_TOOLS 参照）。既定は 0 なので検証済みの式のまま。
  */
-export function capacityOf(doctors: number, extraVisitsPerDoctorPerDay = 0): number {
-  return doctors * (VISITS_PER_DOCTOR_PER_DAY + extraVisitsPerDoctorPerDay) * CLINIC_DAYS_PER_MONTH;
+export function capacityOf(
+  doctors: number,
+  extraVisitsPerDoctorPerDay = 0,
+  visitsPerDoctorPerDay = VISITS_PER_DOCTOR_PER_DAY,
+): number {
+  return doctors * (visitsPerDoctorPerDay + extraVisitsPerDoctorPerDay) * CLINIC_DAYS_PER_MONTH;
 }
 
 /**
@@ -85,19 +90,34 @@ export function nextReputation(previous: number, waitMinutes: number): number {
   return clamp(damaged, REPUTATION_MIN, REPUTATION_MAX);
 }
 
-/** 検証モデルの離脱率（四半期あたり）。**この式は変えない** */
-export function quarterlyChurnRateOf(waitMinutes: number): number {
-  return (
-    BASE_CHURN_RATE_PER_QUARTER + excessWait(waitMinutes) * CHURN_PER_EXCESS_MINUTE_PER_QUARTER
-  );
+/**
+ * 検証モデルの離脱率（四半期あたり）。**この式は変えない**
+ *
+ * ★1 で頭打ちにする。全員より多くは離脱しないので上限は当たり前だが、
+ * それ以上に **1 を超えると monthlyFromQuarterly が NaN を返す**
+ * （(1-r) が負になり、その立方根を取ろうとする）。
+ *
+ * 検証モデルの最大待ち時間は 53 分（四半期離脱率 0.12）なのでここには届かず、
+ * 検証済みの結果は動かない。届くのは通院頻度の高い科（整形外科）で
+ * 医師が足りない、といった後から足した経路。**患者数が NaN になって
+ * セーブごと壊れる**ので、率の側で止める。
+ */
+export function quarterlyChurnRateOf(
+  waitMinutes: number,
+  baseRate = BASE_CHURN_RATE_PER_QUARTER,
+): number {
+  return Math.min(1, baseRate + excessWait(waitMinutes) * CHURN_PER_EXCESS_MINUTE_PER_QUARTER);
 }
 
 /**
  * 1ヶ月あたりの離脱率。
  * 3ヶ月複利で掛けると検証モデルの四半期離脱率に一致する。
  */
-export function churnRateOf(waitMinutes: number): number {
-  return monthlyFromQuarterly(quarterlyChurnRateOf(waitMinutes));
+export function churnRateOf(
+  waitMinutes: number,
+  baseRate = BASE_CHURN_RATE_PER_QUARTER,
+): number {
+  return monthlyFromQuarterly(quarterlyChurnRateOf(waitMinutes, baseRate));
 }
 
 /** 新規患者は「3ヶ月前の」評判に依存する。これが遅延の源泉 */
@@ -147,8 +167,17 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   const { config, month, doctors, nurseSufficiency, allocatedNurses, effectiveFeeIndex } = input;
   const id = config.id;
 
+  // 科の性格。**内科は検証済みの定数そのもの**なので、内科なら式が元のまま残る
+  const specialty = specialtyOf(config.specialtyId);
   const isOpen = month >= config.openMonth;
-  const identity = { id, name: config.name, openMonth: config.openMonth, open: isOpen };
+  const identity = {
+    id,
+    name: config.name,
+    specialtyId: specialty.id,
+    specialtyName: specialty.name,
+    openMonth: config.openMonth,
+    open: isOpen,
+  };
   if (!isOpen) {
     return {
       ...identity,
@@ -171,24 +200,31 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
     (input.newPatientMultiplier ?? 1) *
     marketShare;
   const demandVisits =
-    (openingStock * VISITS_PER_PATIENT_PER_MONTH + newPatients) * (input.demandMultiplier ?? 1);
+    (openingStock * specialty.visitsPerPatientPerMonth + newPatients) *
+    (input.demandMultiplier ?? 1);
 
-  const capacity = capacityOf(doctors, input.extraVisitsPerDoctorPerDay ?? 0);
+  const capacity = capacityOf(
+    doctors,
+    input.extraVisitsPerDoctorPerDay ?? 0,
+    specialty.visitsPerDoctorPerDay,
+  );
   const effectiveCapacity = capacity * nurseSufficiency * (input.capacityMultiplier ?? 1);
   const utilization = effectiveCapacity === 0 ? 0 : demandVisits / effectiveCapacity;
   const waitMinutes = effectiveCapacity === 0 ? 0 : waitMinutesOf(utilization);
 
   const reputation = nextReputation(input.previousReputation, waitMinutes);
-  const churnRate = churnRateOf(waitMinutes);
+  const churnRate = churnRateOf(waitMinutes, specialty.baseChurnRatePerQuarter);
   const patientStock = openingStock * (1 - churnRate) + newPatients;
 
   // 捌けなかった需要は収益にならない。待ち時間として跳ね返るだけ
   const visitsServed = Math.min(demandVisits, effectiveCapacity);
 
   const insuranceRevenue: Man =
-    (visitsServed * POINTS_PER_VISIT * YEN_PER_POINT * (effectiveFeeIndex / 100)) / YEN_PER_MAN;
+    (visitsServed * specialty.pointsPerVisit * YEN_PER_POINT * (effectiveFeeIndex / 100)) /
+    YEN_PER_MAN;
   const selfPayRevenue: Man =
-    ((patientStock * SELF_PAY_YEN_PER_PATIENT) / YEN_PER_MAN) * (input.selfPayMultiplier ?? 1);
+    ((patientStock * specialty.selfPayYenPerPatient) / YEN_PER_MAN) *
+    (input.selfPayMultiplier ?? 1);
 
   const operatingCost: Man =
     doctors === 0

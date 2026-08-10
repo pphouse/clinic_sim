@@ -112,6 +112,14 @@ await visit('bureau', async () => {
 await advance(6);
 await beat(600);
 
+// --- 4b. ★分院に医師を置くには枠が要る。医局の枠は埋まっているので紹介会社へ
+await visit('agency', async () => {
+  await shot('08b-agency');
+  await page.getByRole('button', { name: /枠を1つ確保する/ }).click();
+  await beat(900);
+  await shot('08c-agency-hired');
+});
+
 // --- 5. 借入で谷を越えてから、承継で分院を開く
 await visit('bank', async () => {
   await shot('09-bank');
@@ -122,17 +130,26 @@ await visit('bank', async () => {
 
 await beat(600);
 await shot('11-sites');
+
+// --- 5b. ★開院画面。立地は決まった。ここで決めるのは科。
+// 「競合なし」の縁が光っている科が、この商圏で空いているセグメント
 await page.getByTestId('open-site-D').click();
+await beat(1400);
+await shot('11b-opening-specialty');
+// 眼科は設備2倍で現金が届かない（ボタンが落ちている）。本町は整形が強い
+await page.getByTestId('specialty-seikei').click();
 await beat(1200);
 await shot('12-opened-D');
 
-// D院を開いて医師を増やす。承継なので初日から患者がいる
+// D院を開く。承継なので初日から患者がいる。
+// ★＋ボタンは落ちている。調達可能数を使い切っているので、
+// これ以上は医局の関係値を上げるか紹介会社で枠を買うしかない
 await page.getByRole('button', { name: /D院（承継）/ }).first().click();
 await beat(900);
 await shot('12b-clinic-D');
-await page.getByLabel('常勤医を増やす').click();
-await beat(700);
-await shot('12c-clinic-D-doctors');
+await page.getByRole('button', { name: '商圏', exact: true }).click();
+await beat(1200);
+await shot('12c-clinic-D-market');
 await page.getByLabel('閉じる').click();
 await beat(600);
 

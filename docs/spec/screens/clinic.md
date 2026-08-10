@@ -61,7 +61,7 @@ sim から読む値だけを列挙する。UI で計算しない（CLAUDE.md §2
 | 捌けた診察 | `ClinicTick.visitsServed` | 回 |
 | 捌けなかった診察 | `unservedVisits(tick)` | 回 |
 
-### 商圏タブ — 誰と取り合っているか
+### 商圏タブ — 誰と取り合っているか（商圏 × 科）
 
 `docs/spec/04-market.md`。自院と競合のシェアを棒で並べる。
 

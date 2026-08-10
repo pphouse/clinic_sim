@@ -21,6 +21,7 @@ import {
   COMPETITOR_STRENGTH_MIN,
   DISTRICTS,
   DOCTOR_RESIGN_CHANCE,
+  SPECIALTIES,
   EPIDEMIC_CHANCE,
   EPIDEMIC_MONTHS,
   NURSE_EXODUS_CHANCE,
@@ -33,6 +34,7 @@ import type {
   Month,
   RandomEventOccurrence,
   Rng,
+  SpecialtyId,
 } from './types';
 
 export interface RandomEventInput {
@@ -42,6 +44,8 @@ export interface RandomEventInput {
   openClinics: ClinicConfig[];
   /** 院ごとの配置医師数 */
   doctorsByClinic: Record<ClinicId, number>;
+  /** 院ごとの患者数。競合はここが大きいセグメントへ来る */
+  patientStockByClinic: Record<ClinicId, number>;
   nurses: number;
   /** 有効な加算の合計率。個別指導の返還額はここに比例する */
   addonTotal: number;
@@ -56,7 +60,13 @@ export interface RandomEventOutcome {
   /** 突発離職した看護師 */
   nursesLost: number;
   /** 商圏に新しく開業した競合。シェアの計算に入る */
-  newCompetitors: { id: string; name: string; districtId: string; strength: number }[];
+  newCompetitors: {
+    id: string;
+    name: string;
+    districtId: string;
+    specialtyId: SpecialtyId;
+    strength: number;
+  }[];
   /** 返還請求。P/L の特別損失に出る */
   extraordinaryLoss: Man;
   /** 流行が終わる月。null なら今月は起きていない */
@@ -133,25 +143,44 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
   // ★以前は「ポテンシャルが恒久的に −15%」という係数だった。やめた理由：
   // 減り幅はシェアの計算から自然に出るので、係数で殴ると二重に効く。
   // それに、係数だと**なぜ減ったのかが画面から読めない**（相手が見えない）。
-  const districtsWithClinics = new Set(input.openClinics.map((c) => c.districtId));
-  for (const district of DISTRICTS) {
-    if (!districtsWithClinics.has(district.id)) continue;
-    if (!rng.chance(COMPETITOR_CHANCE)) continue;
+  // ③ 競合が開業する。
+  //
+  // ★**儲かっているところに来る。** 患者数で重み付けして、育っている
+  // （商圏 × 科）へ入ってくる。一様抽選にすると、空いたセグメントを見つけて
+  // 放置するのが最適解になる。10年誰も来ないニッチは、ニッチではない。
+  const targets = input.openClinics.filter(
+    (c) => (input.patientStockByClinic[c.id] ?? 0) > 0,
+  );
+  const totalStock = targets.reduce((sum, c) => sum + (input.patientStockByClinic[c.id] ?? 0), 0);
+  if (targets.length > 0 && totalStock > 0 && rng.chance(COMPETITOR_CHANCE * targets.length)) {
+    let pick = rng.next() * totalStock;
+    let target = targets[targets.length - 1]!;
+    for (const clinic of targets) {
+      pick -= input.patientStockByClinic[clinic.id] ?? 0;
+      if (pick <= 0) {
+        target = clinic;
+        break;
+      }
+    }
+    const district = DISTRICTS.find((d) => d.id === target.districtId)!;
+    const specialty = SPECIALTIES.find((s) => s.id === target.specialtyId)!;
     const strength = rng.int(COMPETITOR_STRENGTH_MIN, COMPETITOR_STRENGTH_MAX + 1);
     out.newCompetitors.push({
-      id: `${district.id}-new-${month}`,
-      name: `${district.name}${NEW_COMPETITOR_NAMES[out.newCompetitors.length % NEW_COMPETITOR_NAMES.length]}`,
+      id: `${district.id}-${specialty.id}-${month}`,
+      name: `${district.name}${NEW_COMPETITOR_NAMES[month % NEW_COMPETITOR_NAMES.length]}`,
       districtId: district.id,
+      specialtyId: specialty.id,
       strength,
     });
     out.events.push({
       id: 'competitorOpened',
       month,
+      clinicId: target.id,
       severity: 'warning',
-      title: `${district.name}に新しいクリニックが開業`,
+      title: `${district.name}に${specialty.name}が開業`,
       body:
-        `強さ ${strength} の競合が商圏に加わりました。` +
-        '新規患者のシェアを取られます。評判で押し返せば、いずれ出ていきます。',
+        `強さ ${strength} の競合が ${target.name} と同じ商圏の同じ科に加わりました。` +
+        '育っている場所ほど狙われます。評判で押し返せば、いずれ出ていきます。',
     });
   }
 

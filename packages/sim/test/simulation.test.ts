@@ -20,7 +20,8 @@ import {
 import { CRITICAL_WAIT_MINUTES } from '../src/events';
 import { TOLERABLE_WAIT_MINUTES } from '../src/constants';
 import { INITIAL_CASH, TOTAL_MONTHS } from '../src/constants';
-import { BASELINE_SCENARIO } from '../src/scenario';
+import { BASELINE_SCENARIO, PLAY_SCENARIO } from '../src/scenario';
+import { churnRateOf, quarterlyChurnRateOf } from '../src/engine';
 import { runSimulation } from '../src/simulation';
 
 const expected = locked.months;
@@ -298,5 +299,41 @@ describe('会計の不変条件', () => {
     const shortage = run.months.find((t) => t.financials.balanceSheet.cash < 0)!;
     expect(shortage.month).toBeLessThan(34);
     expect(shortage.financials.balanceSheet.totalEquity).toBeGreaterThan(0);
+  });
+});
+
+// ==================================================================
+// 極端な待ち時間でも壊れない
+// ==================================================================
+
+describe('離脱率の上限', () => {
+  it('★四半期離脱率は 1 で止まる。超えると患者数が NaN になる', () => {
+    // 1 を超える入力（待ち時間 568 分）。(1-r) が負になり立方根が NaN を返す
+    expect(quarterlyChurnRateOf(568)).toBe(1);
+    expect(churnRateOf(568)).toBe(1);
+    expect(Number.isNaN(churnRateOf(568))).toBe(false);
+  });
+
+  it('検証モデルの範囲（最大 53 分）には届かない。結果は動かない', () => {
+    expect(quarterlyChurnRateOf(53)).toBeLessThan(0.2);
+  });
+
+  it('通院頻度の高い科で医師が足りなくても患者数が数のまま', () => {
+    const run = runSimulation({
+      ...PLAY_SCENARIO,
+      features: {},
+      decisions: [
+        { month: 1, doctorsByClinic: { A: 3 } },
+        // 承継1,800人を整形外科（通院頻度1.8倍）で受けて医師1名。待ち時間が爆発する
+        { month: 13, openClinic: 'D', openSpecialty: 'seikei', doctorsByClinic: { D: 1 } },
+      ],
+    });
+    for (const m of run.months) {
+      for (const c of m.clinics) {
+        expect(Number.isFinite(c.patientStock), `${m.month}ヶ月目 ${c.id}院`).toBe(true);
+        expect(Number.isFinite(c.waitMinutes)).toBe(true);
+      }
+      expect(Number.isFinite(m.financials.balanceSheet.totalAssets)).toBe(true);
+    }
   });
 });

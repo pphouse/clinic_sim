@@ -23,6 +23,7 @@ import {
   districtOfClinic,
   runSimulation,
   tickMarket,
+  type CompetitorState,
   type MonthDecision,
   type MonthResult,
 } from '../src/index';
@@ -80,8 +81,31 @@ describe('魅力', () => {
     expect(attractivenessOf(75, 0, 999)).toBeCloseTo(75 * CLINIC_SCALE_MAX, 9);
   });
 
-  it('医師0でも1名ぶんの引力は残る（建物はそこにある）', () => {
-    expect(attractivenessOf(75, 0, 0)).toBeCloseTo(75, 9);
+  it('★医師0なら魅力も0。看板だけの院に患者は来ない', () => {
+    expect(attractivenessOf(75, 0, 0)).toBe(0);
+  });
+
+  it('医師0の院は競合を押し出せない。診察できないのに引力だけあるのは筋が通らない', () => {
+    const empty = {
+      config: { ...CLINICS[0]!, districtId: 'honmachi' },
+      open: true,
+      reputation: 75,
+      waitMinutes: 0,
+      doctors: 0,
+    };
+    const out = tickMarket({
+      month: 1,
+      clinics: [empty],
+      competitors: INITIAL_COMPETITORS.filter((c) => c.districtId === 'honmachi').map((c) => ({
+        ...c,
+        openedAtMonth: 1,
+        weakMonths: 0,
+        closedAtMonth: null,
+      })),
+    });
+    expect(out.shareByClinic['A']).toBe(0);
+    const seg = out.tick.districts.find((d) => d.id === 'honmachi')!;
+    expect(seg.competitors[0]!.share).toBe(1);
   });
 });
 
@@ -208,15 +232,16 @@ describe('競合', () => {
       waitMinutes: 0,
       doctors: 9, // 規模係数を上限まで振って押し切る
     };
-    let competitors = [
+    let competitors: CompetitorState[] = [
       {
         id: 'weak',
         name: '弱い競合',
         districtId: 'honmachi',
+        specialtyId: 'naika',
         strength: 30,
         openedAtMonth: 1,
         weakMonths: 0,
-        closedAtMonth: null as number | null,
+        closedAtMonth: null,
       },
     ];
     let exitMonth = 0;

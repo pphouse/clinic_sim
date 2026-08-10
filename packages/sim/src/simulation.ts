@@ -50,6 +50,8 @@ import {
   IGYOKU_DUTY_GAIN_PER_MONTH,
   CLINIC_SITES,
   EPIDEMIC_DEMAND_UPLIFT,
+  districtDemand,
+  specialtyOf,
 } from './constants';
 import { evaluateGoals } from './goals';
 import { tickMarket } from './market';
@@ -243,12 +245,16 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     if (decision?.openClinic && !state.configs.some((c) => c.id === decision.openClinic)) {
       const site = CLINIC_SITES.find((s) => s.id === decision.openClinic);
       if (site) {
+        // 科は開院時に決める。あとから変えられない（docs/spec/05-specialty.md §8）
+        const specialtyId = decision.openSpecialty ?? 'naika';
         state.configs.push({
           id: site.id,
           name: site.name,
           districtId: site.districtId,
+          specialtyId,
           openMonth: month,
-          newPatientPotential: site.newPatientPotential,
+          // ★その商圏でその科がどれだけ見込めるか。同じ立地でも科で変わる
+          newPatientPotential: districtDemand(site.districtId, specialtyId),
           initialPatientStock: site.initialPatientStock,
         });
         state.clinics.push({
@@ -270,9 +276,11 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     for (const config of state.configs) {
       if (config.openMonth !== month) continue;
       openedClinicsThisMonth++;
-      // 候補地ごとに投資額が違う。承継は患者が付いてくる代わりに高い
+      // 候補地ごとに投資額が違う。承継は患者が付いてくる代わりに高い。
+      // 科でも変わる（眼科は手術機器で2倍、精神科は設備が要らず半分）
       const site = CLINIC_SITES.find((s) => s.id === config.id);
-      const capex = site?.capex ?? CLINIC_CAPEX;
+      const capex =
+        (site?.capex ?? CLINIC_CAPEX) * specialtyOf(config.specialtyId).capexMultiplier;
       const loan = site?.loan ?? CLINIC_LOAN;
       capitalExpenditure += capex;
       state.assets.push(...clinicAssets(config.id, month, capex));
@@ -494,6 +502,9 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         rng,
         openClinics: state.configs.filter((c) => month >= c.openMonth),
         doctorsByClinic: state.doctorPlan,
+        patientStockByClinic: Object.fromEntries(
+          state.clinics.map((c) => [c.id, c.patientStock]),
+        ),
         nurses: state.nurses,
         addonTotal: previousMonth?.fee.addonTotal ?? 0,
         insuranceRevenue: previousMonth?.financials.incomeStatement.insuranceRevenue ?? 0,
@@ -526,15 +537,18 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
 
     // 開院順に配る。**先に開いた院を守る。**
     // 医師が抜けたときに本院から削れると、屋台骨から崩れて立て直せない
+    // 科によって医師1名が食う枠が違う（精神科 1.6、眼科 1.4、内科 1.0）
     const doctorsByClinic: Record<ClinicId, number> = {};
     let doctorsPlanned = 0;
     let remaining = doctorsProcurable;
     for (const config of state.configs) {
       const wanted = month >= config.openMonth ? (state.doctorPlan[config.id] ?? 0) : 0;
       doctorsPlanned += wanted;
-      const placed = Math.min(wanted, Math.max(0, remaining));
+      const cost = specialtyOf(config.specialtyId).doctorScarcity;
+      const affordable = Math.floor(Math.max(0, remaining) / cost + 1e-9);
+      const placed = Math.min(wanted, affordable);
       doctorsByClinic[config.id] = placed;
-      remaining -= placed;
+      remaining -= placed * cost;
     }
     const doctorsTotal = Object.values(doctorsByClinic).reduce((a, b) => a + b, 0);
 

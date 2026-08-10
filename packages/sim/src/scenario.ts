@@ -17,6 +17,7 @@ import type {
   ExternalRelationId,
   Man,
   Month,
+  SpecialtyId,
 } from './types';
 
 /** ある月にプレイヤーが下す意思決定。省略した項目は「前月のまま」 */
@@ -72,6 +73,12 @@ export interface MonthDecision {
 
   /** 分院を開く。CLINIC_SITES の id を渡す */
   openClinic?: ClinicId;
+  /**
+   * その分院で標榜する科。省略すると内科。
+   * **市場のセグメントは（商圏 × 科）** なので、ここが立地と並ぶ判断になる
+   * （docs/spec/05-specialty.md）。
+   */
+  openSpecialty?: SpecialtyId;
   /** 銀行から引く額（万円）。純資産の BANK_LEVERAGE_LIMIT 倍を超えると断られる */
   borrow?: Man;
   /**

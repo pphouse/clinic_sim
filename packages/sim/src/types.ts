@@ -27,6 +27,34 @@ export interface Rng {
 
 export type DistrictId = string;
 
+/** 診療科。docs/spec/05-specialty.md */
+export type SpecialtyId = 'naika' | 'shonika' | 'seikei' | 'hifuka' | 'ganka' | 'seishin';
+
+/**
+ * 科の性格。**内科の値は検証済みの定数そのもの**（倍率ではなく実数で持つ）。
+ * 既定シナリオは全て内科なので、科を足しても検証済みの数字は動かない。
+ */
+export interface SpecialtySpec {
+  id: SpecialtyId;
+  name: string;
+  /** 患者1人あたり月の受診回数。整形は多い（リハビリ）、皮膚科は少ない */
+  visitsPerPatientPerMonth: number;
+  /** 1回あたりの点数。眼科は手術で跳ねる */
+  pointsPerVisit: number;
+  /** 医師1人1日あたりの診察可能数。精神科は診察が長いので少ない */
+  visitsPerDoctorPerDay: number;
+  /** 患者1人あたり月の自費（円）。皮膚科は美容で大きい */
+  selfPayYenPerPatient: number;
+  /** 四半期あたりの基礎離脱率。精神科は切れにくい、小児科は卒業していく */
+  baseChurnRatePerQuarter: number;
+  /** 開業時の設備投資の倍率。眼科は手術機器で重い */
+  capexMultiplier: number;
+  /** 医師1名が食う派遣枠。精神科・眼科は採りにくい */
+  doctorScarcity: number;
+  /** 一言でこの科の性格。UI がそのまま出す */
+  character: string;
+}
+
 export interface ClinicConfig {
   id: ClinicId;
   name: string;
@@ -35,6 +63,11 @@ export interface ClinicConfig {
    * 検証モデルの3院は別々の商圏に置いてあるので、食い合いは起きない。
    */
   districtId: DistrictId;
+  /**
+   * 標榜する科。**1院1科**（docs/spec/05-specialty.md §8）。
+   * 市場のセグメントは（商圏 × 科）なので、科が違えば同じ商圏でも食い合わない。
+   */
+  specialtyId: SpecialtyId;
   /** 開院する月 */
   openMonth: Month;
   /** 1ヶ月あたりの新規患者ポテンシャル（評判 75 のとき） */
@@ -62,6 +95,8 @@ export interface ClinicState {
 /** 1 ヶ月の診療所シミュレーション結果 */
 export interface ClinicTick {
   id: ClinicId;
+  specialtyId: SpecialtyId;
+  specialtyName: string;
   /**
    * 院の素性。**分院はプレイ中に増えるので、UI が CLINICS 定数を読んではいけない。**
    * 読むと「最初から決まっている3院」しか描けない。
@@ -540,6 +575,10 @@ export interface GameEvent {
 export interface DistrictSpec {
   id: DistrictId;
   name: string;
+  /** 街の性格。開院画面に出す */
+  character: string;
+  /** 科ごとの需要係数。内科は全商圏 1.0（商圏ポテンシャルの校正を壊さないため） */
+  demandBias: Record<SpecialtyId, number>;
   /**
    * 商圏に月あたり発生する新規患者。**独占したときの数。**
    * 同じ商圏の院はこれを分け合う（それぞれのシェアを掛ける）。
@@ -551,6 +590,8 @@ export interface CompetitorSpec {
   id: string;
   name: string;
   districtId: DistrictId;
+  /** 同じ科の相手としか取り合わない */
+  specialtyId: SpecialtyId;
   /** 魅力の基礎。20〜100。自院の評判に相当する */
   strength: number;
 }
@@ -568,6 +609,7 @@ export interface CompetitorView {
   id: string;
   name: string;
   districtId: DistrictId;
+  specialtyId: SpecialtyId;
   strength: number;
   share: number;
   /** 撤退まであと何ヶ月か。押し込めていなければ null */
@@ -583,9 +625,12 @@ export interface DistrictClinicView {
   share: number;
 }
 
+/** 市場のセグメント。**商圏そのものではなく（商圏 × 科）** */
 export interface DistrictView {
   id: DistrictId;
   name: string;
+  specialtyId: SpecialtyId;
+  specialtyName: string;
   clinics: DistrictClinicView[];
   competitors: CompetitorView[];
   /** 自社の合計シェア */

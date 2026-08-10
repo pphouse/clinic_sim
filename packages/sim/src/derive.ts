@@ -237,6 +237,7 @@ export function congestionOf(waitMinutes: number): Congestion {
 export interface ClinicSummary {
   id: ClinicId;
   name: string;
+  specialtyName: string;
   /** 開院済みか */
   open: boolean;
   openMonth: Month;
@@ -263,6 +264,7 @@ export function clinicSummaries(result: MonthResult): ClinicSummary[] {
   return result.clinics.map((tick) => ({
     id: tick.id,
     name: tick.name,
+    specialtyName: tick.specialtyName,
     open: tick.open,
     openMonth: tick.openMonth,
     patientStock: tick.patientStock,
