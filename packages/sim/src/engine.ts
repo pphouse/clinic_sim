@@ -136,6 +136,11 @@ export interface ClinicTickInput {
   rentMultiplier?: number;
   /** 受診需要に掛かる係数。感染症の流行で 1 を上回る */
   demandMultiplier?: number;
+  /**
+   * 商圏でのシェア 0〜1。競合が居なければ 1（docs/spec/04-market.md）。
+   * 省略時は 1 なので、検証済みの式がそのまま残る。
+   */
+  marketShare?: number;
 }
 
 export function tickClinic(input: ClinicTickInput): ClinicTick {
@@ -150,7 +155,7 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
       newPatients: 0, patientStock: 0, demandVisits: 0,
       capacity: 0, effectiveCapacity: 0, utilization: 0,
       waitMinutes: 0, reputation: input.previousReputation, churnRate: 0,
-      visitsServed: 0, insuranceRevenue: 0, selfPayRevenue: 0,
+      visitsServed: 0, marketShare: 0, insuranceRevenue: 0, selfPayRevenue: 0,
       operatingCost: 0, operatingIncome: 0,
     };
   }
@@ -159,9 +164,12 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   const isFirstMonth = month === config.openMonth;
   const openingStock = isFirstMonth ? config.initialPatientStock : input.previousStock;
 
+  // ポテンシャルは「その商圏を独占したときの新規患者数」。競合が居ればシェアを取られる
+  const marketShare = input.marketShare ?? 1;
   const newPatients =
     newPatientsOf(config.newPatientPotential, input.laggedReputation) *
-    (input.newPatientMultiplier ?? 1);
+    (input.newPatientMultiplier ?? 1) *
+    marketShare;
   const demandVisits =
     (openingStock * VISITS_PER_PATIENT_PER_MONTH + newPatients) * (input.demandMultiplier ?? 1);
 
@@ -202,6 +210,7 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
     reputation,
     churnRate,
     visitsServed,
+    marketShare,
     insuranceRevenue,
     selfPayRevenue,
     operatingCost,

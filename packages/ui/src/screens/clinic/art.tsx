@@ -9,6 +9,7 @@
  */
 import clinicIcon from '../../assets/clinic-icon.svg';
 import tabIncome from '../../assets/tab-income.svg';
+import tabMap from '../../assets/tab-map.svg';
 import tabOverview from '../../assets/tab-overview.svg';
 import tabPatients from '../../assets/tab-patients.svg';
 import clinicIllustration from '../../assets/clinic-illustration.svg';
@@ -111,6 +112,8 @@ export function ManagerPortrait() {
 const TAB_ICONS = {
   overview: tabOverview,
   patients: tabPatients,
+  // 商圏は地理の話。地図のアイコンをそのまま使う（マップが根なので下タブには出ていない）
+  market: tabMap,
   income: tabIncome,
 } as const;
 

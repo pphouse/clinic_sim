@@ -17,6 +17,8 @@ import type {
   Addon,
   ClinicConfig,
   ClinicId,
+  CompetitorSpec,
+  DistrictSpec,
   EmrTier,
   ExternalRelationId,
   FeeRevision,
@@ -134,10 +136,38 @@ export const CLINIC_CAPEX_EQUIPMENT_SHARE = 0.6;
 export const RECEIVABLE_MONTHS = 2;
 export const CORPORATE_TAX_RATE = 0.3;
 
+/**
+ * 商圏。**同じ商圏の院はシェアを食い合う**（docs/spec/04-market.md）。
+ * 検証モデルの3院は別々の商圏に置いてある。食い合いが起きないので数字が動かない。
+ */
+/**
+ * ★ポテンシャルは「その商圏を独占したときの新規患者数」。
+ *
+ * 検証モデルの 150/130/110（四半期）は**競合が居る現実の中で A院が実際に得ていた数**で、
+ * 競合の存在が数字の中に畳み込まれていた。競合を盤上に出す以上、
+ * 畳み込まれていた分をほどいて独占値に戻さないと、同じ商売が半分の規模になってしまう。
+ *
+ * 開始時のシェアを掛けると検証モデルの水準に戻るように置いてある：
+ *   本町 260/四半期 × A院の初期シェア 58%（評判75・医師3 対 本町内科70）≒ 150
+ *   駅前 350 × B院のシェア 37%（競合 82+64）≒ 130
+ *   住宅地 110 × 100%（競合なし）= 110
+ */
+export const DISTRICTS: DistrictSpec[] = [
+  { id: 'honmachi', name: '本町', newPatientPotential: 260 / MONTHS_PER_QUARTER },
+  { id: 'ekimae', name: '駅前', newPatientPotential: 350 / MONTHS_PER_QUARTER },
+  { id: 'jutaku', name: '住宅地', newPatientPotential: 110 / MONTHS_PER_QUARTER },
+  { id: 'shinko', name: '新興住宅地', newPatientPotential: 270 / MONTHS_PER_QUARTER },
+];
+
+/** 商圏のポテンシャル。分院の候補地とプレイ用の本院はここから引く */
+export function districtPotential(id: string): number {
+  return DISTRICTS.find((d) => d.id === id)?.newPatientPotential ?? 0;
+}
+
 export const CLINICS: ClinicConfig[] = [
-  { id: 'A', name: 'A院（本院）', openMonth: 1, newPatientPotential: 150 / MONTHS_PER_QUARTER, initialPatientStock: 3200 },
-  { id: 'B', name: 'B院', openMonth: 19, newPatientPotential: 130 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
-  { id: 'C', name: 'C院', openMonth: 43, newPatientPotential: 110 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
+  { id: 'A', name: 'A院（本院）', districtId: 'honmachi', openMonth: 1, newPatientPotential: 150 / MONTHS_PER_QUARTER, initialPatientStock: 3200 },
+  { id: 'B', name: 'B院', districtId: 'ekimae', openMonth: 19, newPatientPotential: 130 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
+  { id: 'C', name: 'C院', districtId: 'jutaku', openMonth: 43, newPatientPotential: 110 / MONTHS_PER_QUARTER, initialPatientStock: 0 },
 ];
 
 /** 改定は偶数年の4月に施行される。月1＝1年目4月なので、13・37・61…が4月にあたる */
@@ -482,6 +512,7 @@ export const ENDING_TITLES: { minScore: number; title: string }[] = [
 export interface ClinicSite {
   id: ClinicId;
   name: string;
+  districtId: string;
   /** 一言で立地の性格。UI がそのまま出す */
   character: string;
   newPatientPotential: number;
@@ -495,36 +526,40 @@ export interface ClinicSite {
 export const CLINIC_SITES: ClinicSite[] = [
   {
     id: 'B',
+    districtId: 'ekimae',
     name: 'B院（駅前）',
     character: '人通りは多いが家賃も高い。新規開業',
-    newPatientPotential: 130 / MONTHS_PER_QUARTER,
+    newPatientPotential: districtPotential('ekimae'),
     initialPatientStock: 0,
     capex: 6000,
     loan: 8000,
   },
   {
     id: 'C',
+    districtId: 'jutaku',
     name: 'C院（住宅地）',
     character: '落ち着いた住宅地。新規開業',
-    newPatientPotential: 110 / MONTHS_PER_QUARTER,
+    newPatientPotential: districtPotential('jutaku'),
     initialPatientStock: 0,
     capex: 6000,
     loan: 8000,
   },
   {
     id: 'D',
+    districtId: 'honmachi',
     name: 'D院（承継）',
     character: '引退する先生の医院を引き継ぐ。患者が付いてくるが高い',
-    newPatientPotential: 90 / MONTHS_PER_QUARTER,
+    newPatientPotential: districtPotential('honmachi'),
     initialPatientStock: 1800,
     capex: 11000,
     loan: 12000,
   },
   {
     id: 'E',
+    districtId: 'shinko',
     name: 'E院（新興住宅地）',
     character: '若い世帯が増えている。伸びしろは大きい',
-    newPatientPotential: 160 / MONTHS_PER_QUARTER,
+    newPatientPotential: districtPotential('shinko'),
     initialPatientStock: 0,
     capex: 7000,
     loan: 9000,
@@ -557,9 +592,50 @@ export const DOCTOR_RESIGN_CHANCE = 0.005;
 /** 看護師の突発離職が起きる確率と、そのときに抜ける人数 */
 export const NURSE_EXODUS_CHANCE = 0.012;
 export const NURSE_EXODUS_COUNT = 3;
-/** 近隣に競合が開業する確率。その院の新規患者ポテンシャルが恒久的に落ちる */
+/** 近隣に競合が開業する確率（商圏あたり月） */
 export const COMPETITOR_CHANCE = 0.005;
-export const COMPETITOR_POTENTIAL_LOSS = 0.15;
+/** 新しく開業する競合の強さの幅 */
+export const COMPETITOR_STRENGTH_MIN = 55;
+export const COMPETITOR_STRENGTH_MAX = 85;
+/**
+ * ★撤退の条件。シェアをこの水準未満に、この月数だけ押さえ込み続けると出ていく。
+ *
+ * 撤退があるから、評判を上げることが「奪って、追い出す」まで繋がる。
+ * これまで評判は自院の新規患者にしか効いていなかった。
+ */
+export const COMPETITOR_EXIT_SHARE = 0.3;
+export const COMPETITOR_EXIT_MONTHS = 18;
+
+/**
+ * 医師1名あたり魅力に乗る係数。
+ *
+ * 評判だけで魅力を作ると、1院でも3院でも引力が同じになる。
+ * 実際には医師が多い方が診療時間も枠も広く、集患力が強い。
+ * ★**これが無いと競合を押し出せない。**
+ * 評判は 75（BASELINE_REPUTATION）へ回帰するだけで**それを超えない**ので、
+ * 評判だけを材料にすると魅力の上限が 75 になり、strength 70 の相手を
+ * どうやっても押し出せない。撤退という報酬が届かないなら、書いてある意味がない。
+ *
+ * 医師を増やして押し出すのは**割に合わない投資に見えて、割に合う**：
+ * 過剰な医師の人件費を1年半払い、その後は相手のシェアが丸ごと自分のものになる。
+ */
+export const CLINIC_SCALE_WEIGHT = 0.2;
+/** 規模係数の上限。青天井にすると医師を積むだけのゲームになる */
+export const CLINIC_SCALE_MAX = 2.5;
+
+/**
+ * 最初から地域に居る競合。**プレイ用のシナリオだけが持つ。**
+ * 既定シナリオは1軒も置かないので、シェアは常に 1 で検証済みの式のまま。
+ *
+ * 駅前は人通りが多い（ポテンシャル 130）が競合が2軒。
+ * 住宅地は競合が居ないがポテンシャルが低い（110）。**楽な商圏は儲からない。**
+ */
+export const INITIAL_COMPETITORS: CompetitorSpec[] = [
+  { id: 'honmachi-naika', name: '本町内科クリニック', districtId: 'honmachi', strength: 70 },
+  { id: 'ekimae-medical', name: '駅前メディカル', districtId: 'ekimae', strength: 82 },
+  { id: 'ekimae-sakura', name: 'さくら小児科', districtId: 'ekimae', strength: 64 },
+  { id: 'shinko-nijiiro', name: 'にじいろクリニック', districtId: 'shinko', strength: 58 },
+];
 /** 厚生局の個別指導。加算を多く持っているほど返還額が大きい */
 export const AUDIT_CHANCE = 0.008;
 /** 返還請求額＝有効な加算の合計率 × 保険診療収入 × この倍率 */

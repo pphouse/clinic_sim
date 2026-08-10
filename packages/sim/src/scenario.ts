@@ -8,8 +8,16 @@
  * そのまま意思決定として書き下したもの。ゴールデンテストの入力になる。
  * **この列を変えるとゴールデンテストが落ちる。**
  */
-import { CLINICS } from './constants';
-import type { ClinicConfig, ClinicId, EmrTier, ExternalRelationId, Man, Month } from './types';
+import { CLINICS, INITIAL_COMPETITORS, districtPotential } from './constants';
+import type {
+  ClinicConfig,
+  ClinicId,
+  CompetitorSpec,
+  EmrTier,
+  ExternalRelationId,
+  Man,
+  Month,
+} from './types';
 
 /** ある月にプレイヤーが下す意思決定。省略した項目は「前月のまま」 */
 export interface MonthDecision {
@@ -100,6 +108,11 @@ export interface Scenario {
    * プレイ用のシナリオは A 院だけを置き、残りはプレイヤーが開く。
    */
   clinics?: ClinicConfig[];
+  /**
+   * 最初から地域に居る競合。**省略すると1軒も居ない。**
+   * 既定シナリオが省略しているので、シェアは常に 1 で検証済みの式のまま。
+   */
+  competitors?: CompetitorSpec[];
   features?: ScenarioFeatures;
 }
 
@@ -167,7 +180,10 @@ export const PLAY_SCENARIO: Scenario = {
   totalMonths: 120,
   initialIgyokuRelation: 60,
   initialNurses: 7.5,
-  clinics: [CLINICS[0]!],
+  // ★本院のポテンシャルは商圏の独占値。検証モデルの 150 は競合込みの実績値なので、
+  // 競合を盤上に出す本編では、畳み込まれていた分をほどいた数を使う（constants.ts）
+  clinics: [{ ...CLINICS[0]!, newPatientPotential: districtPotential('honmachi') }],
+  competitors: INITIAL_COMPETITORS,
   features: { randomEvents: true },
   decisions: [{ month: 1, doctorsByClinic: { A: 3 } }],
 };

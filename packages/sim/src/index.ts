@@ -9,6 +9,7 @@ export * from './scenario';
 export * from './simulation';
 export * from './accounting';
 export * from './expansion';
+export * from './market';
 export * from './goals';
 export * from './save';
 export * from './randomEvents';

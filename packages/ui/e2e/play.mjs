@@ -67,8 +67,17 @@ await page.waitForSelector('[data-testid="month-label"]');
 await beat(1600);
 await shot('01-start');
 
-// --- 1. 何を目指しているかが見えている。未来は見えない
+// --- 1. 何を目指しているかが見えている。未来は見えない。競合が地図に居る
 await shot('02-goals');
+
+// --- 1b. 商圏。**新規患者は独占値にシェアを掛けた分しか来ない**
+await page.getByRole('button', { name: /A院（本院）/ }).first().click();
+await beat(900);
+await page.getByRole('button', { name: '商圏', exact: true }).click();
+await beat(1400);
+await shot('02b-market');
+await page.getByLabel('閉じる').click();
+await beat(500);
 
 // --- 2. 医局へ当直を出して関係を積む。枠は落ちるが、派遣枠が増える
 await visit('igyoku', async () => {
@@ -130,6 +139,15 @@ await beat(600);
 await advance(24);
 await beat(800);
 await shot('13-m37');
+
+// --- 5b. 本町を A院と D院で挟んだ結果。競合のシェアが削れている
+await page.getByRole('button', { name: /A院（本院）/ }).first().click();
+await beat(800);
+await page.getByRole('button', { name: '商圏', exact: true }).click();
+await beat(1400);
+await shot('13b-market-squeezed');
+await page.getByLabel('閉じる').click();
+await beat(500);
 
 // --- 6. 役員報酬。個人資産の帯が伸び、内部留保の帯が縮む
 await visit('personalWealth', async () => {

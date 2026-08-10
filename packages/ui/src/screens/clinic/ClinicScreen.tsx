@@ -9,6 +9,7 @@
  */
 import {
   ADDONS,
+  districtOfClinic,
   CRITICAL_WAIT_MINUTES,
   REPUTATION_MIN,
   TOLERABLE_WAIT_MINUTES,
@@ -27,6 +28,8 @@ import { StarRating } from '../../components/StarRating';
 import { TrendChart } from '../../components/TrendChart';
 import { ScreenShell, type ShellTab } from '../../components/ScreenShell';
 import { StatRow } from '../../components/StatRow';
+import { Note } from '../../components/Section';
+import type { ReactNode } from 'react';
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -38,7 +41,7 @@ import {
 import { man, minutes, percent, people, points, visits } from '../../format';
 import { ClinicIcon, ClinicIllustration, ManagerPortrait, TabIcon } from './art';
 
-export type ClinicTabId = 'overview' | 'patients' | 'income';
+export type ClinicTabId = 'overview' | 'patients' | 'market' | 'income';
 
 export interface ClinicScreenProps {
   clinicId: ClinicId;
@@ -183,7 +186,7 @@ function HeroStar({ reputation, delta }: { reputation: number; delta?: string })
   );
 }
 
-function SectionTitle({ children }: { children: string }) {
+function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <h2
       style={{
@@ -219,6 +222,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
   const { result, previous, clinicId } = props;
   const clinic = result.clinics.find((c) => c.id === clinicId)!;
   const doctors = result.staff.doctorsByClinic[clinicId] ?? 0;
+  const district = districtOfClinic(result.market, props.clinicId);
   const events = eventsForScreen(result, 'clinic');
   const delta = clinicDelta(result, previous, clinicId);
   // 直近2年。遅延が1年なので、山と谷が両方入る長さが要る
@@ -236,6 +240,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
   const tabs: ShellTab[] = [
     { id: 'overview', label: '概要', icon: <TabIcon kind="overview" />, badge: events.length },
     { id: 'patients', label: '患者', icon: <TabIcon kind="patients" /> },
+    { id: 'market', label: '商圏', icon: <TabIcon kind="market" /> },
     { id: 'income', label: '収支', icon: <TabIcon kind="income" /> },
   ];
 
@@ -294,9 +299,12 @@ export function ClinicScreen(props: ClinicScreenProps) {
 
           {/*
             ★この画面の主張。待ち時間の山と患者ストックの谷が1年ずれているのが、
-            数字ではなく形で見える。並べて描かないと因果は伝わらない
+            数字ではなく形で見える。並べて描かないと因果は伝わらない。
+
+            商圏タブでだけ隠す。あちらは棒が主役で、折れ線を上に置くと
+            グラフが2種類並んで**どちらを読めばいいのか分からなくなる。**
           */}
-          {stockSeries.values.length > 1 && (
+          {props.tab !== 'market' && stockSeries.values.length > 1 && (
             <div
               style={{
                 padding: 'var(--space-3) 0 var(--space-2)',
@@ -430,6 +438,111 @@ export function ClinicScreen(props: ClinicScreenProps) {
               >
                 溢れた分は収益にならず、翌月にも繰り越さない。永久に失われる。
               </p>
+            </>
+          )}
+
+          {props.tab === 'market' && district && (
+            <>
+              <SectionTitle>{district.name}の取り合い</SectionTitle>
+              <Note>
+                新規患者は<strong>商圏を独占したときの数にシェアを掛けた分</strong>だけ来る。
+                魅力は評判・待ち時間・医師数の3つで決まり、
+                同じ商圏の自院同士も食い合う（docs/spec/04-market.md）。
+              </Note>
+              <div style={{ paddingTop: 'var(--space-4)' }}>
+                {[
+                  ...district.clinics.map((c) => ({
+                    key: c.id,
+                    name: c.name,
+                    share: c.share,
+                    detail: `魅力 ${c.attractiveness.toFixed(0)}`,
+                    own: true,
+                    exit: null as number | null,
+                  })),
+                  ...district.competitors.map((c) => ({
+                    key: c.id,
+                    name: c.name,
+                    share: c.share,
+                    detail: `強さ ${c.strength}`,
+                    own: false,
+                    exit: c.monthsToExit,
+                  })),
+                ]
+                  .sort((a, b) => b.share - a.share)
+                  .map((row) => (
+                    <div key={row.key} style={{ padding: 'var(--space-2) 0' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'baseline',
+                          gap: 'var(--space-2)',
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 'var(--text-body)',
+                            color: row.own ? 'var(--paper)' : 'var(--paper-dim)',
+                            fontWeight: row.own ? 600 : 400,
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {row.name}
+                        </span>
+                        <span
+                          className="num"
+                          style={{
+                            fontSize: 'var(--text-body)',
+                            color: row.own ? 'var(--paper)' : 'var(--paper-mute)',
+                          }}
+                        >
+                          {percent(row.share, 0)}%
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          height: 6,
+                          marginTop: 4,
+                          borderRadius: 3,
+                          background: 'var(--ink-700)',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${row.share * 100}%`,
+                            height: '100%',
+                            borderRadius: 3,
+                            background: row.own ? 'var(--hq-accent)' : 'var(--critical)',
+                            opacity: row.own ? 1 : 0.55,
+                            transition: 'width 240ms ease-out',
+                          }}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 'var(--text-caption)',
+                          color: 'var(--paper-mute)',
+                          marginTop: 2,
+                        }}
+                      >
+                        {row.detail}
+                        {row.exit !== null && `・押し込み中。あと ${row.exit}ヶ月で撤退`}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              <SectionTitle>自社の取り分</SectionTitle>
+              <StatRow label={`${district.name}のシェア`} value={percent(district.ownShare, 0)} unit="%" total />
+              <StatRow label="今月の新規患者" value={people(clinic.newPatients)} unit="人" />
+              <Note>
+                競合を <strong>18ヶ月続けて 30% 未満</strong>に押し込むと撤退する。
+                医師を増やせば引力は上がるが、患者が育つ前の増員は人件費でそのまま損になる。
+              </Note>
             </>
           )}
 

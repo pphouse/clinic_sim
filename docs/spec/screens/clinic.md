@@ -61,6 +61,24 @@ sim から読む値だけを列挙する。UI で計算しない（CLAUDE.md §2
 | 捌けた診察 | `ClinicTick.visitsServed` | 回 |
 | 捌けなかった診察 | `unservedVisits(tick)` | 回 |
 
+### 商圏タブ — 誰と取り合っているか
+
+`docs/spec/04-market.md`。自院と競合のシェアを棒で並べる。
+
+| 表示名 | sim のフィールド |
+|---|---|
+| 各社のシェア | `districtOfClinic(result.market, clinicId)` の `clinics[]` / `competitors[]` |
+| 自院の魅力 | `DistrictClinicView.attractiveness` |
+| 競合の強さ | `CompetitorView.strength` |
+| 撤退まで | `CompetitorView.monthsToExit`（押し込めていなければ出さない） |
+| 自社の取り分 | `DistrictView.ownShare` |
+
+★**このタブでは折れ線を隠す。** 棒が主役なのに折れ線を上に置くと、
+グラフが2種類並んでどちらを読めばいいのか分からなくなる。
+
+自院は塗り、競合は薄い赤。**押し込み中の競合だけ色が変わる**（緑）。
+「あと何ヶ月で撤退」は押し込めているときだけ出す。出すと嘘になるので。
+
 ### 収支タブ
 
 | 表示名 | sim のフィールド | 書式 |

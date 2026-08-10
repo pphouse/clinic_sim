@@ -17,7 +17,9 @@ import {
   AUDIT_CHANCE,
   AUDIT_CLAWBACK_MONTHS,
   COMPETITOR_CHANCE,
-  COMPETITOR_POTENTIAL_LOSS,
+  COMPETITOR_STRENGTH_MAX,
+  COMPETITOR_STRENGTH_MIN,
+  DISTRICTS,
   DOCTOR_RESIGN_CHANCE,
   EPIDEMIC_CHANCE,
   EPIDEMIC_MONTHS,
@@ -53,19 +55,30 @@ export interface RandomEventOutcome {
   doctorsLost: Record<ClinicId, number>;
   /** 突発離職した看護師 */
   nursesLost: number;
-  /** 新規患者ポテンシャルが恒久的に落ちる院と、その率 */
-  potentialLoss: Record<ClinicId, number>;
+  /** 商圏に新しく開業した競合。シェアの計算に入る */
+  newCompetitors: { id: string; name: string; districtId: string; strength: number }[];
   /** 返還請求。P/L の特別損失に出る */
   extraordinaryLoss: Man;
   /** 流行が終わる月。null なら今月は起きていない */
   epidemicUntilMonth: Month | null;
 }
 
+/**
+ * 新規開業する競合の屋号。**地名＋これ**で作る。
+ * 名前が付いていないと地図に置いたときにただの点になる。
+ */
+const NEW_COMPETITOR_NAMES = [
+  'ファミリークリニック',
+  '内科・小児科医院',
+  'メディカルセンター',
+  '総合クリニック',
+];
+
 const empty = (): RandomEventOutcome => ({
   events: [],
   doctorsLost: {},
   nursesLost: 0,
-  potentialLoss: {},
+  newCompetitors: [],
   extraordinaryLoss: 0,
   epidemicUntilMonth: null,
 });
@@ -115,17 +128,30 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
     });
   }
 
-  // ③ 近隣に競合が開業。その院の新規患者ポテンシャルが**恒久的に**落ちる
-  for (const clinic of input.openClinics) {
+  // ③ 商圏に競合が開業する。
+  //
+  // ★以前は「ポテンシャルが恒久的に −15%」という係数だった。やめた理由：
+  // 減り幅はシェアの計算から自然に出るので、係数で殴ると二重に効く。
+  // それに、係数だと**なぜ減ったのかが画面から読めない**（相手が見えない）。
+  const districtsWithClinics = new Set(input.openClinics.map((c) => c.districtId));
+  for (const district of DISTRICTS) {
+    if (!districtsWithClinics.has(district.id)) continue;
     if (!rng.chance(COMPETITOR_CHANCE)) continue;
-    out.potentialLoss[clinic.id] = COMPETITOR_POTENTIAL_LOSS;
+    const strength = rng.int(COMPETITOR_STRENGTH_MIN, COMPETITOR_STRENGTH_MAX + 1);
+    out.newCompetitors.push({
+      id: `${district.id}-new-${month}`,
+      name: `${district.name}${NEW_COMPETITOR_NAMES[out.newCompetitors.length % NEW_COMPETITOR_NAMES.length]}`,
+      districtId: district.id,
+      strength,
+    });
     out.events.push({
       id: 'competitorOpened',
       month,
-      clinicId: clinic.id,
       severity: 'warning',
-      title: `${clinic.name} の近くに競合が開業`,
-      body: `新規患者のポテンシャルが恒久的に ${Math.round(COMPETITOR_POTENTIAL_LOSS * 100)}% 落ちます。元には戻りません。`,
+      title: `${district.name}に新しいクリニックが開業`,
+      body:
+        `強さ ${strength} の競合が商圏に加わりました。` +
+        '新規患者のシェアを取られます。評判で押し返せば、いずれ出ていきます。',
     });
   }
 

@@ -16,6 +16,7 @@ import {
   reputationStars,
   type ClinicId,
   type ClinicSummary,
+  type CompetitorView,
   type MonthDecision,
   type MonthResult,
   type ScreenId,
@@ -29,7 +30,7 @@ import {
   ChevronsLeftIcon,
   ChevronsRightIcon,
 } from '../../components/icons';
-import { compactMan, formatSignedMan, minutes, people } from '../../format';
+import { compactMan, formatSignedMan, minutes, people, percent } from '../../format';
 import mapDistrict from '../../assets/map-district.svg';
 import { BUILDING_GROUPS, buildingsInGroup } from '../registry';
 
@@ -43,6 +44,28 @@ const MAP_POSITIONS: Record<ClinicId, { left: string; top: string }> = {
   C: { left: '42%', top: '73%' },
   D: { left: '55%', top: '30%' },
   E: { left: '22%', top: '62%' },
+};
+
+/**
+ * 競合の位置。**自院より控えめに描く**（docs/spec/04-market.md §5）。
+ * 地図の主役は自院で、競合は環境。
+ *
+ * 最初から居る4軒は決め打ち。突発事象で増えた競合は商圏の代表点に寄せて置く
+ * （そこまで作り込む価値が無い。名前とシェアが読めれば判断はできる）。
+ */
+const COMPETITOR_POSITIONS: Record<string, { left: string; top: string }> = {
+  'honmachi-naika': { left: '26%', top: '20%' },
+  'ekimae-medical': { left: '72%', top: '40%' },
+  'ekimae-sakura': { left: '62%', top: '66%' },
+  'shinko-nijiiro': { left: '32%', top: '86%' },
+};
+
+/** 商圏の代表点。名前の無い新規競合はここへ置く */
+const DISTRICT_POSITIONS: Record<string, { left: string; top: string }> = {
+  honmachi: { left: '22%', top: '46%' },
+  ekimae: { left: '76%', top: '58%' },
+  jutaku: { left: '54%', top: '88%' },
+  shinko: { left: '24%', top: '76%' },
 };
 
 const CONGESTION_COLOR = {
@@ -79,6 +102,7 @@ export function MapScreen(props: MapScreenProps) {
   // まだ開いていない候補地。**開けるものだけを出す**のではなく、
   // 足りない額まで見せる。「いくら足りないか」が次の判断になる
   const sites = CLINIC_SITES.filter((site) => !summaries.some((c) => c.id === site.id));
+  const rivals = result.market.districts.flatMap((d) => d.competitors);
 
   return (
     <div
@@ -152,6 +176,10 @@ export function MapScreen(props: MapScreenProps) {
               border: '1px solid var(--ink-700)',
             }}
           />
+          {/* 競合を先に描く。自院のピンが上に重なるように */}
+          {rivals.map((rival) => (
+            <CompetitorPin key={rival.id} rival={rival} />
+          ))}
           {summaries.map((clinic) => (
             <MapPin
               key={clinic.id}
@@ -482,6 +510,67 @@ function SummaryCell({
           {delta}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 競合のピン。**自院より弱く描く。** 塗りを持たせず、輪郭だけ。
+ * 地図の主役は自院で、競合は環境（docs/spec/04-market.md §5）。
+ * 押せない。中に入る用事が無い相手なので、押せる形にしない。
+ */
+function CompetitorPin({ rival }: { rival: CompetitorView }) {
+  const pos =
+    COMPETITOR_POSITIONS[rival.id] ??
+    DISTRICT_POSITIONS[rival.districtId] ?? { left: '50%', top: '50%' };
+  const pushing = rival.monthsToExit !== null;
+
+  return (
+    <div
+      aria-label={`${rival.name} シェア ${percent(rival.share, 0)}%`}
+      data-testid={`rival-pin-${rival.id}`}
+      style={{
+        position: 'absolute',
+        left: pos.left,
+        top: pos.top,
+        transform: 'translate(-50%, -100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 2,
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 4,
+          padding: '2px 7px',
+          borderRadius: 'var(--radius-sm)',
+          border: `1px dashed ${pushing ? 'var(--positive)' : 'var(--paper-mute)'}`,
+          background: 'rgba(14, 20, 25, 0.72)',
+          color: pushing ? 'var(--positive)' : 'var(--paper-mute)',
+          fontSize: 'var(--text-caption)',
+          whiteSpace: 'nowrap',
+          maxWidth: 116,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{rival.name}</span>
+        <span className="num">{percent(rival.share, 0)}%</span>
+      </div>
+      <div
+        style={{
+          width: 0,
+          height: 0,
+          borderLeft: '4px solid transparent',
+          borderRight: '4px solid transparent',
+          borderTop: `6px solid ${pushing ? 'var(--positive)' : 'var(--paper-mute)'}`,
+          opacity: 0.7,
+        }}
+      />
     </div>
   );
 }

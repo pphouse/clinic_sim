@@ -52,6 +52,7 @@ import {
   EPIDEMIC_DEMAND_UPLIFT,
 } from './constants';
 import { evaluateGoals } from './goals';
+import { tickMarket } from './market';
 import { rollRandomEvents } from './randomEvents';
 import {
   advanceRelations,
@@ -137,6 +138,7 @@ function initialState(scenario: Scenario): MutableState {
     rngSeed: scenario.seed,
     clinics: configs.map<ClinicState>((c) => ({
       id: c.id,
+      waitMinutes: 0,
       patientStock: 0,
       reputation: INITIAL_REPUTATION,
       reputationHistory: Array.from(
@@ -178,6 +180,12 @@ function initialState(scenario: Scenario): MutableState {
     cumulativeExecutiveSalary: 0,
     personalCash: 0,
     personalAssets: [],
+    competitors: (scenario.competitors ?? []).map((c) => ({
+      ...c,
+      openedAtMonth: 1,
+      weakMonths: 0,
+      closedAtMonth: null,
+    })),
   };
 }
 
@@ -238,12 +246,14 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         state.configs.push({
           id: site.id,
           name: site.name,
+          districtId: site.districtId,
           openMonth: month,
           newPatientPotential: site.newPatientPotential,
           initialPatientStock: site.initialPatientStock,
         });
         state.clinics.push({
           id: site.id,
+          waitMinutes: 0,
           patientStock: 0,
           reputation: INITIAL_REPUTATION,
           reputationHistory: Array.from(
@@ -494,10 +504,9 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         state.doctorPlan[id] = Math.max(0, (state.doctorPlan[id] ?? 0) - lost);
       }
       state.nurses = Math.max(0, state.nurses - rolled.nursesLost);
-      for (const [id, loss] of Object.entries(rolled.potentialLoss)) {
-        const config = state.configs.find((c) => c.id === id);
-        // **恒久的に落ちる。** 元には戻らない
-        if (config) config.newPatientPotential *= 1 - loss;
+      // 競合は係数ではなく**盤上の相手**として増える。減り幅はシェアから出る
+      for (const rival of rolled.newCompetitors) {
+        state.competitors.push({ ...rival, openedAtMonth: month, weakMonths: 0, closedAtMonth: null });
       }
       extraordinaryLoss += rolled.extraordinaryLoss;
       if (rolled.epidemicUntilMonth !== null) state.epidemicUntilMonth = rolled.epidemicUntilMonth;
@@ -599,6 +608,26 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     const selfPayMultiplier =
       relationSelfPayMultiplier(relations) * (1 + vendor.equipmentSelfPayUplift);
 
+    // ------------------------------------------------ 3.7 商圏
+    //
+    // ★シェアは**前月の**評判と待ち時間から出す。今月の待ち時間は今月の需要で決まり、
+    // 需要はシェアで決まるので、今月の値を使うと循環する（docs/spec/04-market.md §2）。
+    const marketOutcome = tickMarket({
+      month,
+      clinics: state.configs.map((config) => {
+        const previous = state.clinics.find((c) => c.id === config.id);
+        return {
+          config,
+          open: month >= config.openMonth,
+          reputation: previous?.reputation ?? INITIAL_REPUTATION,
+          waitMinutes: previous?.waitMinutes ?? 0,
+          doctors: state.doctorPlan[config.id] ?? 0,
+        };
+      }),
+      competitors: state.competitors,
+    });
+    state.competitors = marketOutcome.competitors;
+
     // ---------------------------------------------------------- 4. 診療所
     const clinicTicks: ClinicTick[] = [];
     let insuranceRevenue: Man = 0;
@@ -631,11 +660,13 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         selfPayMultiplier,
         rentMultiplier,
         demandMultiplier: epidemic ? 1 + EPIDEMIC_DEMAND_UPLIFT : 1,
+        marketShare: marketOutcome.shareByClinic[config.id] ?? 1,
       });
       clinicTicks.push(tick);
 
       previous.patientStock = tick.patientStock;
       previous.reputation = tick.reputation;
+      previous.waitMinutes = tick.waitMinutes;
       previous.reputationHistory = [tick.reputation, ...previous.reputationHistory].slice(
         0,
         NEW_PATIENT_REPUTATION_LAG_MONTHS,
@@ -812,6 +843,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       ],
       expansion,
       goals: goalTick,
+      market: marketOutcome.tick,
     });
   }
 

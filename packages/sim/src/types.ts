@@ -25,9 +25,16 @@ export interface Rng {
 
 // ---------------------------------------------------------------- 診療所
 
+export type DistrictId = string;
+
 export interface ClinicConfig {
   id: ClinicId;
   name: string;
+  /**
+   * どの商圏に属するか。**同じ商圏の院はシェアを食い合う**（docs/spec/04-market.md）。
+   * 検証モデルの3院は別々の商圏に置いてあるので、食い合いは起きない。
+   */
+  districtId: DistrictId;
   /** 開院する月 */
   openMonth: Month;
   /** 1ヶ月あたりの新規患者ポテンシャル（評判 75 のとき） */
@@ -38,6 +45,8 @@ export interface ClinicConfig {
 
 export interface ClinicState {
   id: ClinicId;
+  /** 前月の待ち時間。シェアは前月の魅力で決まるので持ち歩く必要がある */
+  waitMinutes: number;
   /** 通院患者ストック。このゲームの実体資産 */
   patientStock: number;
   /** 評判 20〜100。落ちるのは速く、戻るのは遅い */
@@ -74,6 +83,8 @@ export interface ClinicTick {
   churnRate: number;
   /** MIN(需要, 実効枠)。捌けなかった分は収益にならない */
   visitsServed: number;
+  /** 商圏でのシェア 0〜1。競合が居なければ 1 */
+  marketShare: number;
   insuranceRevenue: Man;
   selfPayRevenue: Man;
   operatingCost: Man;
@@ -483,6 +494,8 @@ export interface GameState {
   cumulativeExecutiveSalary: Man;
   personalCash: Man;
   personalAssets: string[];
+  /** 盤上の競合。既定シナリオでは空 */
+  competitors: CompetitorState[];
 }
 
 /** 1 ヶ月の全出力。UI はこれだけを読む */
@@ -498,6 +511,8 @@ export interface MonthResult {
   expansion: ExpansionTick;
   /** 3本のゴールの進捗と、終わったかどうか */
   goals: GoalTick;
+  /** 商圏。競合が居なければシェアは全て 1 */
+  market: MarketTick;
 }
 
 export interface GameEvent {
@@ -510,6 +525,73 @@ export interface GameEvent {
   screen: ScreenId;
   title: string;
   body: string;
+}
+
+// ---------------------------------------------------------------- 商圏と競合
+//
+// 検証モデルには競合が居なかった。隣に分院を出しても本院の患者は1人も減らなかった。
+// **既定シナリオは競合0・1商圏1院なので、シェアは常に 1 で恒等式のまま**
+// （docs/spec/04-market.md）。
+
+export interface DistrictSpec {
+  id: DistrictId;
+  name: string;
+  /**
+   * 商圏に月あたり発生する新規患者。**独占したときの数。**
+   * 同じ商圏の院はこれを分け合う（それぞれのシェアを掛ける）。
+   */
+  newPatientPotential: number;
+}
+
+export interface CompetitorSpec {
+  id: string;
+  name: string;
+  districtId: DistrictId;
+  /** 魅力の基礎。20〜100。自院の評判に相当する */
+  strength: number;
+}
+
+/** 盤上の競合。撤退の判定のために「弱い月」を数える */
+export interface CompetitorState extends CompetitorSpec {
+  openedAtMonth: Month;
+  /** シェアが撤退水準を下回り続けている月数 */
+  weakMonths: number;
+  /** 撤退した月。null なら営業中 */
+  closedAtMonth: Month | null;
+}
+
+export interface CompetitorView {
+  id: string;
+  name: string;
+  districtId: DistrictId;
+  strength: number;
+  share: number;
+  /** 撤退まであと何ヶ月か。押し込めていなければ null */
+  monthsToExit: number | null;
+  openedAtMonth: Month;
+}
+
+export interface DistrictClinicView {
+  id: ClinicId;
+  name: string;
+  /** 評判 × 待ち時間ペナルティ */
+  attractiveness: number;
+  share: number;
+}
+
+export interface DistrictView {
+  id: DistrictId;
+  name: string;
+  clinics: DistrictClinicView[];
+  competitors: CompetitorView[];
+  /** 自社の合計シェア */
+  ownShare: number;
+}
+
+export interface MarketTick {
+  districts: DistrictView[];
+  /** 今月撤退した競合 */
+  closed: CompetitorView[];
 }
 
 // ---------------------------------------------------------------- ゴールと終局
