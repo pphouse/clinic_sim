@@ -461,8 +461,14 @@ const personnelBody = ({ result }: BuildingScreenProps): Body => {
           <StatRow label="紹介会社の確保枠" value={staff.agencyHiresCumulative} unit="枠" />
           <StatRow label="調達可能数" value={staff.doctorsProcurable} unit="名" total />
           <StatRow
+            label="あと置ける数"
+            value={Math.max(0, staff.doctorsProcurable - staff.doctorsTotal)}
+            unit="名"
+            emphasis
+          />
+          <StatRow
             label="不足"
-            value={staff.doctorShortfall ? 'あり' : 'なし'}
+            value={staff.doctorShortfall ? `${staff.doctorsUnfilled}名 空席` : 'なし'}
             suffix={
               staff.doctorShortfall ? (
                 <StatusPill text="調達枠を超過" tone="critical" />

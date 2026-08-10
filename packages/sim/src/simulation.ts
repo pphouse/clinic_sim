@@ -515,9 +515,26 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       state.epidemicUntilMonth !== null && month < state.epidemicUntilMonth;
 
     // ---------------------------------------------------------- 2. 人材
+    //
+    // ★調達可能数を先に決める。**置きたい人数がそのまま置けるとは限らない。**
+    // 医局の派遣枠と紹介会社の累計がその月に確保できる医師の上限で、
+    // 超えた分は「採用できていない空席」として消える。
+    // ここでクランプしないと、医局も紹介会社も無視して医師を積めてしまい、
+    // あの2画面が警告を出すだけの飾りになる。
+    const igyokuSlots = igyokuSlotsOf(state.igyokuRelation);
+    const doctorsProcurable = igyokuSlots + state.agencyHiresCumulative;
+
+    // 開院順に配る。**先に開いた院を守る。**
+    // 医師が抜けたときに本院から削れると、屋台骨から崩れて立て直せない
     const doctorsByClinic: Record<ClinicId, number> = {};
+    let doctorsPlanned = 0;
+    let remaining = doctorsProcurable;
     for (const config of state.configs) {
-      doctorsByClinic[config.id] = month >= config.openMonth ? (state.doctorPlan[config.id] ?? 0) : 0;
+      const wanted = month >= config.openMonth ? (state.doctorPlan[config.id] ?? 0) : 0;
+      doctorsPlanned += wanted;
+      const placed = Math.min(wanted, Math.max(0, remaining));
+      doctorsByClinic[config.id] = placed;
+      remaining -= placed;
     }
     const doctorsTotal = Object.values(doctorsByClinic).reduce((a, b) => a + b, 0);
 
@@ -534,8 +551,6 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     const nurseSufficiency = nurseSufficiencyOf(state.nurses, nursesRequired);
     const allocated = allocateNurses(state.nurses, doctorsByClinic);
 
-    const igyokuSlots = igyokuSlotsOf(state.igyokuRelation);
-    const doctorsProcurable = igyokuSlots + state.agencyHiresCumulative;
     const staff: StaffTick = {
       doctorsByClinic,
       doctorsTotal,
@@ -543,7 +558,9 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       igyokuSlots,
       agencyHiresCumulative: state.agencyHiresCumulative,
       doctorsProcurable,
-      doctorShortfall: doctorsTotal > doctorsProcurable,
+      doctorShortfall: doctorsPlanned > doctorsProcurable,
+      doctorsPlanned,
+      doctorsUnfilled: doctorsPlanned - doctorsTotal,
       nurses: state.nurses,
       nursesRequired,
       nurseSufficiency,

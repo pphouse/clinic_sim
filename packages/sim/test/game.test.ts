@@ -129,6 +129,65 @@ describe('分院を開く', () => {
 });
 
 // ==================================================================
+// 医師の調達
+// ==================================================================
+
+describe('医師の調達', () => {
+  it('★調達可能数を超えて医師は置けない。医局も紹介会社も無視できない', () => {
+    const run = play([{ month: 1, doctorsByClinic: { A: 12 } }]);
+    const staff = at(run, 6).staff;
+    expect(staff.doctorsPlanned).toBe(12);
+    expect(staff.doctorsTotal).toBe(staff.doctorsProcurable);
+    expect(staff.doctorsUnfilled).toBe(12 - staff.doctorsProcurable);
+    expect(staff.doctorShortfall).toBe(true);
+  });
+
+  it('置けなかった医師の人件費は出ない。診察枠にも入らない', () => {
+    const over = play([{ month: 1, doctorsByClinic: { A: 12 } }]);
+    const exact = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    expect(at(over, 6).financials.incomeStatement.doctorPayroll).toBeCloseTo(
+      at(exact, 6).financials.incomeStatement.doctorPayroll, 6);
+    expect(at(over, 6).clinics[0]!.capacity).toBeCloseTo(at(exact, 6).clinics[0]!.capacity, 6);
+  });
+
+  it('医局の関係値が上がると置ける人数が増える', () => {
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 6 } },
+      { month: 13, igyokuRelationDelta: 40 },
+    ]);
+    expect(at(run, 12).staff.doctorsTotal).toBeLessThan(6);
+    expect(at(run, 14).staff.doctorsTotal).toBeGreaterThan(at(run, 12).staff.doctorsTotal);
+  });
+
+  it('紹介会社の枠でも増える。金で買える方の経路', () => {
+    const without = play([{ month: 1, doctorsByClinic: { A: 6 } }]);
+    const withAgency = play([
+      { month: 1, doctorsByClinic: { A: 6 } },
+      { month: 13, agencyHires: 2 },
+    ]);
+    expect(at(withAgency, 14).staff.doctorsTotal).toBe(at(without, 14).staff.doctorsTotal + 2);
+  });
+
+  it('★足りないときは後から開いた院から削る。本院を守る', () => {
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 3 } },
+      // 派遣枠3のまま2院目に2名置こうとする
+      { month: 13, openClinic: 'B', doctorsByClinic: { B: 2 } },
+    ]);
+    const staff = at(run, 14).staff;
+    expect(staff.doctorsByClinic['A']).toBe(3);
+    expect(staff.doctorsByClinic['B']).toBe(0);
+    expect(staff.doctorsUnfilled).toBe(2);
+  });
+
+  it('既定シナリオは一度も不足しない。クランプを足しても検証済みの結果が動かない', () => {
+    const baseline = runSimulation(BASELINE_SCENARIO);
+    expect(baseline.months.every((m) => !m.staff.doctorShortfall)).toBe(true);
+    expect(baseline.months.every((m) => m.staff.doctorsUnfilled === 0)).toBe(true);
+  });
+});
+
+// ==================================================================
 // 借入
 // ==================================================================
 
@@ -270,8 +329,10 @@ describe('終局', () => {
   it('債務超過は1ヶ月では終わらない。谷で殺すと大型投資が全部悪手になる', () => {
     const run = play([
       { month: 1, doctorsByClinic: { A: 3 } },
-      // 現金を食い潰す。学校2.5億＋分院＋大量の医師
-      { month: 13, openSchool: true, openClinic: 'B', doctorsByClinic: { A: 6, B: 6 } },
+      // 現金を食い潰す。学校2.5億＋分院＋役員報酬の満額。
+      // ★医師を積んで潰すことはもうできない（調達可能数でクランプされる）
+      { month: 13, openSchool: true, openClinic: 'B', executiveSalary: EXECUTIVE_SALARY_MAX },
+      { month: 25, openClinic: 'E', buyProperty: ['A'] },
     ]);
     const firstInsolvent = run.months.find((m) => m.financials.balanceSheet.totalEquity < 0);
     const end = run.months.find((m) => m.goals.end.ended);

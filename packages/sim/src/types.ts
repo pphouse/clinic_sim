@@ -105,6 +105,10 @@ export interface StaffTick {
   doctorsProcurable: number;
   /** 計画医師数 > 調達可能数 */
   doctorShortfall: boolean;
+  /** プレイヤーが置きたかった人数の合計 */
+  doctorsPlanned: number;
+  /** ★調達できずに空いたままの席。ここが 0 でないと計画どおりに動いていない */
+  doctorsUnfilled: number;
 
   nurses: number;
   nursesRequired: number;

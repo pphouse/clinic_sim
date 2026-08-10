@@ -257,7 +257,14 @@ export function ClinicScreen(props: ClinicScreenProps) {
           ? greetingFor(clinic.waitMinutes, clinic.reputation, doctors)
           : 'この院はまだ開院していません。'
       }
-      dock={<ControlDock {...props} doctors={doctors} opened={opened} />}
+      dock={
+        <ControlDock
+          {...props}
+          doctors={doctors}
+          opened={opened}
+          atProcurementLimit={result.staff.doctorsTotal >= result.staff.doctorsProcurable}
+        />
+      }
       tabs={tabs}
       activeTabId={props.tab}
       onTabChange={(id) => props.onTabChange(id as ClinicTabId)}
@@ -612,7 +619,7 @@ export function ClinicScreen(props: ClinicScreenProps) {
  * 同じ見た目で並べると、どちらが取り返しのつかない操作なのか分からなくなる。
  */
 function ControlDock(
-  props: ClinicScreenProps & { doctors: number; opened: boolean },
+  props: ClinicScreenProps & { doctors: number; opened: boolean; atProcurementLimit: boolean },
 ) {
   return (
     <div
@@ -642,7 +649,11 @@ function ControlDock(
           常勤医
         </span>
         <span style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-mute)' }}>
-          {props.onDoctorsChange ? '動かすと以後の月がすべて計算し直される' : '過ぎた月は読むだけ'}
+          {!props.onDoctorsChange
+            ? '過ぎた月は読むだけ'
+            : props.atProcurementLimit
+              ? '調達可能数に達している。医局か紹介会社へ'
+              : '動かすと以後の月がすべて計算し直される'}
         </span>
       </div>
       <div className="stepper">
@@ -665,7 +676,7 @@ function ControlDock(
             label="常勤医を増やす"
             tone="primary"
             icon={<PlusIcon size={22} />}
-            disabled={!props.opened || !props.onDoctorsChange}
+            disabled={!props.opened || !props.onDoctorsChange || props.atProcurementLimit}
             onClick={() => props.onDoctorsChange?.(props.doctors + 1)}
           />
       </div>
