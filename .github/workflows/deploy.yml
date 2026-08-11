@@ -1,0 +1,62 @@
+# GitHub Pages へ静的に配る。
+#
+# このゲームはサーバを持たない（シム核は純粋関数、セーブは localStorage）ので、
+# ビルドした dist を置くだけで iPhone の Safari から遊べる。
+#
+# ★1度だけ手で要る設定：リポジトリの Settings → Pages → Source を
+#   「GitHub Actions」にする。これをしないとこのワークフローは配れない。
+name: deploy
+
+on:
+  push:
+    # ★このリポジトリのデフォルトブランチは main ではない。
+    # main だけを見ていると永久に発火しないので、実際のデフォルトブランチも並べる。
+    # main へ寄せたらこの行は消してよい。
+    branches:
+      - main
+      - claude/repository-setup-implementation-xzttcf
+  # 手で回せるようにしておく。ブランチを指定して確認したいことがある
+  workflow_dispatch:
+
+# 同時に走らせない。あとから来た方を待たせる
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # ★バージョンを書かない。ルートの package.json の packageManager を読む。
+      # 両方に書くと action-setup が「2箇所で指定されている」と言って落ちる。
+      # 版の出どころは package.json ひとつに保つ
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # ★配る前に検証済みのモデルが壊れていないことを確かめる。
+      # ゴールデンが落ちているものを iPhone に届けない
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @med/ui build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/ui/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

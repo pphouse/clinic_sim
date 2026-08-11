@@ -8,11 +8,21 @@
  * そのまま意思決定として書き下したもの。ゴールデンテストの入力になる。
  * **この列を変えるとゴールデンテストが落ちる。**
  */
-import type { ClinicId, Quarter } from './types';
+import { CLINICS, INITIAL_COMPETITORS, districtPotential } from './constants';
+import type {
+  ClinicConfig,
+  ClinicId,
+  CompetitorSpec,
+  EmrTier,
+  ExternalRelationId,
+  Man,
+  Month,
+  SpecialtyId,
+} from './types';
 
-/** ある四半期にプレイヤーが下す意思決定。省略した項目は「前四半期のまま」 */
-export interface QuarterDecision {
-  quarter: Quarter;
+/** ある月にプレイヤーが下す意思決定。省略した項目は「前月のまま」 */
+export interface MonthDecision {
+  month: Month;
   /**
    * 各院に配置する常勤医の数。書いた院だけが変わり、書かなかった院は据え置き。
    * 開院前の院に人を置いても無視される。
@@ -31,9 +41,62 @@ export interface QuarterDecision {
   openSchool?: boolean;
   /**
    * 医局関係の維持費を払うか。既定は払う。
-   * 払わないと関係値が RELATION_DECAY_PER_QUARTER ずつ落ちる。
+   * 払わないと関係値が RELATION_DECAY_PER_MONTH ずつ落ちる。
    */
   maintainIgyoku?: boolean;
+
+  // ---- ここから下は拡張系（docs/spec/screens/ の未着手7画面）。
+  // **省略時は「何もしない」。** 既定シナリオは1つも書いていないので、
+  // 追加しても検証済みの結果は動かない。
+
+  /**
+   * 外部関係の活動を続けるか。書いた相手だけが変わり、書かなかった相手は据え置き。
+   * 活動していない相手は関係値が毎月落ちる（一度も上げていなければ 0 のまま）。
+   */
+  relationActivity?: Partial<Record<ExternalRelationId, boolean>>;
+  /** 電子カルテを乗り換える。移行中は診察枠が落ちる */
+  migrateEmr?: EmrTier;
+  /** 導入する AI の id。枠は増えるが施設基準の医師数には数えない */
+  adoptAiTools?: string[];
+  /** 医療機器を入れる。lease なら B/S に載らない代わりに総額が高い */
+  buyEquipment?: { id: string; lease?: boolean }[];
+  /** 保守契約に入るか。切ると故障が起きて自費の上乗せを失う */
+  maintenanceContract?: boolean;
+  /** 門前薬局を誘致する院 */
+  invitePharmacy?: ClinicId[];
+  /** テナントから自社保有に切り替える院 */
+  buyProperty?: ClinicId[];
+  /** 役員報酬（万円/月）。EXECUTIVE_SALARY_MAX で頭打ち */
+  executiveSalary?: Man;
+  /** 個人で買うもの。法人の数字には効かない */
+  buyPersonalAssets?: string[];
+
+  /** 分院を開く。CLINIC_SITES の id を渡す */
+  openClinic?: ClinicId;
+  /**
+   * その分院で標榜する科。省略すると内科。
+   * **市場のセグメントは（商圏 × 科）** なので、ここが立地と並ぶ判断になる
+   * （docs/spec/05-specialty.md）。
+   */
+  openSpecialty?: SpecialtyId;
+  /** 銀行から引く額（万円）。純資産の BANK_LEVERAGE_LIMIT 倍を超えると断られる */
+  borrow?: Man;
+  /**
+   * 医局へ当直を出すか。続けているあいだ関係値が上がり、診察枠が落ちる。
+   * **金では買えない関係を、枠で買う。**
+   */
+  igyokuDuty?: boolean;
+}
+
+/**
+ * シナリオ単位で入り切る機構。**既定は全てオフ。**
+ *
+ * 突発事象だけはここで切り替える必要がある。意思決定で起こすものではないので、
+ * 「使わなければ眠っている」形にできない。既定シナリオがオフである限り、
+ * 検証済みの 120 ヶ月は一度も乱数を引かない。
+ */
+export interface ScenarioFeatures {
+  randomEvents?: boolean;
 }
 
 export interface Scenario {
@@ -41,47 +104,93 @@ export interface Scenario {
   name: string;
   /** 乱数の種。同じ種なら何度回しても同じ結果になる */
   seed: number;
-  totalQuarters: number;
+  totalMonths: number;
   /** 開始時点の医局関係値 */
   initialIgyokuRelation: number;
   /** 開始時点の看護師数。開院時は充足しているものとする */
   initialNurses: number;
-  decisions: QuarterDecision[];
+  decisions: MonthDecision[];
+  /**
+   * 最初から存在する院。省略すると検証モデルの3院（A/B/C）。
+   * プレイ用のシナリオは A 院だけを置き、残りはプレイヤーが開く。
+   */
+  clinics?: ClinicConfig[];
+  /**
+   * 最初から地域に居る競合。**省略すると1軒も居ない。**
+   * 既定シナリオが省略しているので、シェアは常に 1 で検証済みの式のまま。
+   */
+  competitors?: CompetitorSpec[];
+  features?: ScenarioFeatures;
+}
+
+/** シナリオが持つ院。省略時は検証モデルの3院 */
+export function clinicsOf(scenario: Scenario): ClinicConfig[] {
+  return scenario.clinics ?? CLINICS;
 }
 
 /**
- * 既定シナリオ。検証モデルの40四半期をそのまま再現する。
+ * 既定シナリオ。検証モデルの40四半期を月刻みに置き直したもの。
+ *
+ * 意思決定の月は「四半期の初月」に置いてある（Q → (Q-1)×3+1）。
+ * 検証モデルは四半期の頭で意思決定していたので、同じ位置に落とすのが忠実。
  *
  * 山場：
- *   Q5〜Q8  A院の常勤医が 3 → 2。待ち時間 Q7 に 53 分、患者ストックの底は Q11
- *   Q5      看護学校を開校（2.5億）。卒業生が出るのは Q17
- *   Q7/Q15  B院・C院を開院
- *   Q3〜Q25 加算を5つ取得。ただし要件割れで通算8四半期は失効している
+ *   13〜24ヶ月目  A院の常勤医が 3 → 2。待ち時間のピークは 19〜21ヶ月目、
+ *                 患者ストックの底は 31〜33ヶ月目。遅延はきっちり1年
+ *   13ヶ月目      看護学校を開校（2.5億）。卒業生が出るのは 49ヶ月目
+ *   19/43ヶ月目   B院・C院を開院
+ *   7〜73ヶ月目   加算を5つ取得。ただし要件割れで落ちている期間がある
  */
 export const BASELINE_SCENARIO: Scenario = {
   id: 'baseline',
   name: '既定シナリオ',
   seed: 20240401,
-  totalQuarters: 40,
+  totalMonths: 120,
   initialIgyokuRelation: 60,
   initialNurses: 7.5,
   decisions: [
-    { quarter: 1, doctorsByClinic: { A: 3 } },
-    { quarter: 3, acquireAddons: ['kinou'] },
-    // 常勤医が1名抜ける。ここから4四半期が既定シナリオの山場
-    { quarter: 5, doctorsByClinic: { A: 2 }, openSchool: true },
-    { quarter: 7, doctorsByClinic: { B: 1 }, igyokuRelationDelta: 20 },
-    { quarter: 9, doctorsByClinic: { A: 3 }, agencyHires: 1, acquireAddons: ['zaitaku'] },
-    { quarter: 15, doctorsByClinic: { C: 1 }, igyokuRelationDelta: 20, acquireAddons: ['seikatsu'] },
-    { quarter: 17, doctorsByClinic: { B: 2 }, agencyHires: 1 },
-    { quarter: 19, acquireAddons: ['jikangai'] },
-    { quarter: 25, acquireAddons: ['dx'] },
-    { quarter: 27, igyokuRelationDelta: 20 },
-    { quarter: 29, agencyHires: 1 },
-    { quarter: 31, doctorsByClinic: { C: 2 } },
+    { month: 1, doctorsByClinic: { A: 3 } },
+    { month: 7, acquireAddons: ['kinou'] },
+    // 常勤医が1名抜ける。ここから1年が既定シナリオの山場
+    { month: 13, doctorsByClinic: { A: 2 }, openSchool: true },
+    { month: 19, doctorsByClinic: { B: 1 }, igyokuRelationDelta: 20 },
+    { month: 25, doctorsByClinic: { A: 3 }, agencyHires: 1, acquireAddons: ['zaitaku'] },
+    { month: 43, doctorsByClinic: { C: 1 }, igyokuRelationDelta: 20, acquireAddons: ['seikatsu'] },
+    { month: 49, doctorsByClinic: { B: 2 }, agencyHires: 1 },
+    { month: 55, acquireAddons: ['jikangai'] },
+    { month: 73, acquireAddons: ['dx'] },
+    { month: 79, igyokuRelationDelta: 20 },
+    { month: 85, agencyHires: 1 },
+    { month: 91, doctorsByClinic: { C: 2 } },
   ],
 };
 
-export function decisionAt(scenario: Scenario, quarter: Quarter): QuarterDecision | undefined {
-  return scenario.decisions.find((d) => d.quarter === quarter);
+export function decisionAt(scenario: Scenario, month: Month): MonthDecision | undefined {
+  return scenario.decisions.find((d) => d.month === month);
 }
+
+
+/**
+ * プレイ用のシナリオ。
+ *
+ * 検証モデルと違うのは3点だけ：
+ *   1. 最初は A 院だけ。**分院はプレイヤーが開く**
+ *   2. 突発事象が入る
+ *   3. 意思決定は空。全部プレイヤーが決める
+ *
+ * 数式は既定シナリオと同じものを通る。**別のゲームにはしていない。**
+ */
+export const PLAY_SCENARIO: Scenario = {
+  id: 'play',
+  name: '本編',
+  seed: 20240401,
+  totalMonths: 120,
+  initialIgyokuRelation: 60,
+  initialNurses: 7.5,
+  // ★本院のポテンシャルは商圏の独占値。検証モデルの 150 は競合込みの実績値なので、
+  // 競合を盤上に出す本編では、畳み込まれていた分をほどいた数を使う（constants.ts）
+  clinics: [{ ...CLINICS[0]!, newPatientPotential: districtPotential('honmachi') }],
+  competitors: INITIAL_COMPETITORS,
+  features: { randomEvents: true },
+  decisions: [{ month: 1, doctorsByClinic: { A: 3 } }],
+};

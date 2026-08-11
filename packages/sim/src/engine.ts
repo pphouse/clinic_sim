@@ -1,32 +1,37 @@
 /**
- * 中核エンジン。
+ * 中核エンジン。刻みは 1 ヶ月。
  *
  * 因果の鎖：
  *   診察枠（医師数 × 看護師充足率）
  *     → 稼働率 → 待ち時間
- *       → 評判（緩慢に動くストック変数）→ 翌四半期の新規患者
+ *       → 評判（緩慢に動くストック変数）→ 3ヶ月後の新規患者
  *       → 離脱率 → 患者ストック
  *         → 収益
  *
  * 遅延の源泉は 2 つある。どちらも意図的なもので、消してはいけない：
- *   1. 新規患者が「前四半期の」評判に依存する（1Q の遅れ）
- *   2. 評判が緩慢に動く（REPUTATION_RECOVERY_RATE = 0.15）
+ *   1. 新規患者が「3ヶ月前の」評判に依存する
+ *   2. 評判が緩慢に動く（基準値へ戻るのに1ヶ月あたり 5.3%）
  *
- * 検証済みの挙動：医師 1 名の欠員が 4 四半期続くと、
- *   待ち時間は Q7 に 53 分でピーク、患者ストックの底は Q11。遅延 4 四半期。
- *   評判は 4 四半期で 75 → 41 まで落ちるが、戻すのに 15 四半期かかる。
+ * 検証済みの挙動：医師 1 名の欠員が 1 年続くと、
+ *   待ち時間は 19〜21ヶ月目に 53 分でピーク、患者ストックの底は 31〜33ヶ月目。遅延 1 年。
+ *   評判は 1 年で 75 → 41 まで落ちるが、戻すのに 4 年近くかかる。
  *   壊すのは一瞬、直すのは何年。
+ *
+ * ★率の扱い：離脱率と評判の回帰率は四半期で検証された値なので、
+ *   monthlyFromQuarterly() で複利のまま月に割る。単純に3で割らない。
  */
 import {
-  BASE_CHURN_RATE,
+  BASE_CHURN_RATE_PER_QUARTER,
   BASE_WAIT_MINUTES,
   BASELINE_REPUTATION,
-  CHURN_PER_EXCESS_MINUTE,
-  CLINIC_DAYS_PER_QUARTER,
-  CLINIC_FIXED_COST_PER_QUARTER,
+  CHURN_PER_EXCESS_MINUTE_PER_QUARTER,
+  CLINIC_DAYS_PER_MONTH,
+  CLINIC_FIXED_COST_PER_MONTH,
   CONGESTION_EXPONENT,
-  DOCTOR_COST_PER_QUARTER,
-  NURSE_COST_PER_QUARTER,
+  DOCTOR_COST_PER_MONTH,
+  MONTHS_PER_QUARTER,
+  MONTHS_PER_YEAR,
+  NURSE_COST_PER_MONTH,
   POINTS_PER_VISIT,
   REPUTATION_MAX,
   REPUTATION_MIN,
@@ -36,22 +41,34 @@ import {
   SUPPLIES_RATE,
   TOLERABLE_WAIT_MINUTES,
   VISITS_PER_DOCTOR_PER_DAY,
-  VISITS_PER_PATIENT_PER_QUARTER,
+  VISITS_PER_PATIENT_PER_MONTH,
   YEN_PER_MAN,
   YEN_PER_POINT,
+  monthlyFromQuarterly,
+  specialtyOf,
 } from './constants';
-import type { ClinicConfig, ClinicTick, Man, Quarter } from './types';
+import type { ClinicConfig, ClinicTick, Man, Month } from './types';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** 医師数から決まる診察枠 */
-export function capacityOf(doctors: number): number {
-  return doctors * VISITS_PER_DOCTOR_PER_DAY * CLINIC_DAYS_PER_QUARTER;
+/**
+ * 医師数から決まる診察枠（月あたり）。
+ *
+ * extraVisitsPerDoctorPerDay は AI の上乗せ。**枠は増えるが施設基準の医師数には
+ * 数えない**（constants.ts の AI_TOOLS 参照）。既定は 0 なので検証済みの式のまま。
+ */
+export function capacityOf(
+  doctors: number,
+  extraVisitsPerDoctorPerDay = 0,
+  visitsPerDoctorPerDay = VISITS_PER_DOCTOR_PER_DAY,
+): number {
+  return doctors * (visitsPerDoctorPerDay + extraVisitsPerDoctorPerDay) * CLINIC_DAYS_PER_MONTH;
 }
 
 /**
  * 待ち時間。稼働率が 1 を超えると急激に伸びる。
  * 稼働率 1.3 で約 1.9 倍、1.6 で約 3.2 倍。
+ * 稼働率は無次元なので、刻みを月にしても式は変わらない。
  */
 export function waitMinutesOf(utilization: number): number {
   if (utilization <= 0) return 0;
@@ -65,7 +82,7 @@ export function excessWait(waitMinutes: number): number {
 
 /**
  * 評判の更新。基準値へ緩やかに回帰しつつ、待ち時間の超過で削られる。
- * 回帰が遅い（0.15/Q）ので、一度落ちると戻すのに何年もかかる。
+ * 回帰が遅いので、一度落ちると戻すのに何年もかかる。
  */
 export function nextReputation(previous: number, waitMinutes: number): number {
   const recovered = previous + (BASELINE_REPUTATION - previous) * REPUTATION_RECOVERY_RATE;
@@ -73,21 +90,49 @@ export function nextReputation(previous: number, waitMinutes: number): number {
   return clamp(damaged, REPUTATION_MIN, REPUTATION_MAX);
 }
 
-export function churnRateOf(waitMinutes: number): number {
-  return BASE_CHURN_RATE + excessWait(waitMinutes) * CHURN_PER_EXCESS_MINUTE;
+/**
+ * 検証モデルの離脱率（四半期あたり）。**この式は変えない**
+ *
+ * ★1 で頭打ちにする。全員より多くは離脱しないので上限は当たり前だが、
+ * それ以上に **1 を超えると monthlyFromQuarterly が NaN を返す**
+ * （(1-r) が負になり、その立方根を取ろうとする）。
+ *
+ * 検証モデルの最大待ち時間は 53 分（四半期離脱率 0.12）なのでここには届かず、
+ * 検証済みの結果は動かない。届くのは通院頻度の高い科（整形外科）で
+ * 医師が足りない、といった後から足した経路。**患者数が NaN になって
+ * セーブごと壊れる**ので、率の側で止める。
+ */
+export function quarterlyChurnRateOf(
+  waitMinutes: number,
+  baseRate = BASE_CHURN_RATE_PER_QUARTER,
+): number {
+  return Math.min(1, baseRate + excessWait(waitMinutes) * CHURN_PER_EXCESS_MINUTE_PER_QUARTER);
 }
 
-/** 新規患者は「前四半期の」評判に依存する。これが遅延の源泉 */
-export function newPatientsOf(potential: number, previousReputation: number): number {
-  return (potential * previousReputation) / BASELINE_REPUTATION;
+/**
+ * 1ヶ月あたりの離脱率。
+ * 3ヶ月複利で掛けると検証モデルの四半期離脱率に一致する。
+ */
+export function churnRateOf(
+  waitMinutes: number,
+  baseRate = BASE_CHURN_RATE_PER_QUARTER,
+): number {
+  return monthlyFromQuarterly(quarterlyChurnRateOf(waitMinutes, baseRate));
+}
+
+/** 新規患者は「3ヶ月前の」評判に依存する。これが遅延の源泉 */
+export function newPatientsOf(potential: number, laggedReputation: number): number {
+  return (potential * laggedReputation) / BASELINE_REPUTATION;
 }
 
 export interface ClinicTickInput {
   config: ClinicConfig;
-  quarter: Quarter;
-  /** 前四半期の患者ストック。開院四半期は initialPatientStock を使う */
+  month: Month;
+  /** 前月の患者ストック。開院月は initialPatientStock を使う */
   previousStock: number;
   previousReputation: number;
+  /** 3ヶ月前の評判。新規患者はこれで決まる（遅延の源泉①） */
+  laggedReputation: number;
   doctors: number;
   /** 全社の看護師充足率 0〜1 */
   nurseSufficiency: number;
@@ -95,57 +140,102 @@ export interface ClinicTickInput {
   allocatedNurses: number;
   /** 診療報酬の実効点数指数（基準 100） */
   effectiveFeeIndex: number;
+
+  // ---- ここから下は拡張系の修正項。**既定値は「何も起きない」。**
+  // 検証モデル（med_sim2.xlsx）には無い経路なので、省略時は式が元のまま残る。
+
+  /** 医師1人1日あたりの診察可能数への上乗せ（AI） */
+  extraVisitsPerDoctorPerDay?: number;
+  /** 診察枠に掛かる係数。当番医・在宅・カルテ移行で 1 を下回る */
+  capacityMultiplier?: number;
+  /** 新規患者に掛かる係数。基幹病院からの紹介で 1 を上回る */
+  newPatientMultiplier?: number;
+  /** 自費収入に掛かる係数。在宅・医療機器で 1 を上回る */
+  selfPayMultiplier?: number;
+  /** 固定費（家賃）に掛かる係数。物件を買うと 1 を下回る */
+  rentMultiplier?: number;
+  /** 受診需要に掛かる係数。感染症の流行で 1 を上回る */
+  demandMultiplier?: number;
+  /**
+   * 商圏でのシェア 0〜1。競合が居なければ 1（docs/spec/04-market.md）。
+   * 省略時は 1 なので、検証済みの式がそのまま残る。
+   */
+  marketShare?: number;
 }
 
 export function tickClinic(input: ClinicTickInput): ClinicTick {
-  const { config, quarter, doctors, nurseSufficiency, allocatedNurses, effectiveFeeIndex } = input;
+  const { config, month, doctors, nurseSufficiency, allocatedNurses, effectiveFeeIndex } = input;
   const id = config.id;
 
-  const isOpen = quarter >= config.openQuarter;
+  // 科の性格。**内科は検証済みの定数そのもの**なので、内科なら式が元のまま残る
+  const specialty = specialtyOf(config.specialtyId);
+  const isOpen = month >= config.openMonth;
+  const identity = {
+    id,
+    name: config.name,
+    specialtyId: specialty.id,
+    specialtyName: specialty.name,
+    openMonth: config.openMonth,
+    open: isOpen,
+  };
   if (!isOpen) {
     return {
-      id,
+      ...identity,
       newPatients: 0, patientStock: 0, demandVisits: 0,
       capacity: 0, effectiveCapacity: 0, utilization: 0,
       waitMinutes: 0, reputation: input.previousReputation, churnRate: 0,
-      visitsServed: 0, insuranceRevenue: 0, selfPayRevenue: 0,
+      visitsServed: 0, marketShare: 0, insuranceRevenue: 0, selfPayRevenue: 0,
       operatingCost: 0, operatingIncome: 0,
     };
   }
 
-  // 開院四半期は承継した患者ストックから始まる
-  const isFirstQuarter = quarter === config.openQuarter;
-  const openingStock = isFirstQuarter ? config.initialPatientStock : input.previousStock;
+  // 開院月は承継した患者ストックから始まる
+  const isFirstMonth = month === config.openMonth;
+  const openingStock = isFirstMonth ? config.initialPatientStock : input.previousStock;
 
-  const newPatients = newPatientsOf(config.newPatientPotential, input.previousReputation);
-  const demandVisits = openingStock * VISITS_PER_PATIENT_PER_QUARTER + newPatients;
+  // ポテンシャルは「その商圏を独占したときの新規患者数」。競合が居ればシェアを取られる
+  const marketShare = input.marketShare ?? 1;
+  const newPatients =
+    newPatientsOf(config.newPatientPotential, input.laggedReputation) *
+    (input.newPatientMultiplier ?? 1) *
+    marketShare;
+  const demandVisits =
+    (openingStock * specialty.visitsPerPatientPerMonth + newPatients) *
+    (input.demandMultiplier ?? 1);
 
-  const capacity = capacityOf(doctors);
-  const effectiveCapacity = capacity * nurseSufficiency;
+  const capacity = capacityOf(
+    doctors,
+    input.extraVisitsPerDoctorPerDay ?? 0,
+    specialty.visitsPerDoctorPerDay,
+  );
+  const effectiveCapacity = capacity * nurseSufficiency * (input.capacityMultiplier ?? 1);
   const utilization = effectiveCapacity === 0 ? 0 : demandVisits / effectiveCapacity;
   const waitMinutes = effectiveCapacity === 0 ? 0 : waitMinutesOf(utilization);
 
   const reputation = nextReputation(input.previousReputation, waitMinutes);
-  const churnRate = churnRateOf(waitMinutes);
+  const churnRate = churnRateOf(waitMinutes, specialty.baseChurnRatePerQuarter);
   const patientStock = openingStock * (1 - churnRate) + newPatients;
 
   // 捌けなかった需要は収益にならない。待ち時間として跳ね返るだけ
   const visitsServed = Math.min(demandVisits, effectiveCapacity);
 
   const insuranceRevenue: Man =
-    (visitsServed * POINTS_PER_VISIT * YEN_PER_POINT * (effectiveFeeIndex / 100)) / YEN_PER_MAN;
-  const selfPayRevenue: Man = (patientStock * SELF_PAY_YEN_PER_PATIENT) / YEN_PER_MAN;
+    (visitsServed * specialty.pointsPerVisit * YEN_PER_POINT * (effectiveFeeIndex / 100)) /
+    YEN_PER_MAN;
+  const selfPayRevenue: Man =
+    ((patientStock * specialty.selfPayYenPerPatient) / YEN_PER_MAN) *
+    (input.selfPayMultiplier ?? 1);
 
   const operatingCost: Man =
     doctors === 0
       ? 0
       : (insuranceRevenue + selfPayRevenue) * SUPPLIES_RATE +
-        doctors * DOCTOR_COST_PER_QUARTER +
-        allocatedNurses * NURSE_COST_PER_QUARTER +
-        CLINIC_FIXED_COST_PER_QUARTER;
+        doctors * DOCTOR_COST_PER_MONTH +
+        allocatedNurses * NURSE_COST_PER_MONTH +
+        CLINIC_FIXED_COST_PER_MONTH * (input.rentMultiplier ?? 1);
 
   return {
-    id,
+    ...identity,
     newPatients,
     patientStock,
     demandVisits,
@@ -156,6 +246,7 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
     reputation,
     churnRate,
     visitsServed,
+    marketShare,
     insuranceRevenue,
     selfPayRevenue,
     operatingCost,
@@ -163,8 +254,43 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   };
 }
 
-export function quarterLabel(q: Quarter): string {
-  const year = Math.floor((q - 1) / 4) + 1;
-  const quarter = ((q - 1) % 4) + 1;
-  return `Y${year}Q${quarter}`;
+// ---------------------------------------------------------------- 暦
+//
+// 年度は 4 月始まり。恣意的な選択ではなく、診療報酬改定が偶数年の 4 月に
+// 施行されることに合わせている。月1＝1年目4月と置くと、既定シナリオの改定
+// （13・37・61・85・109ヶ月目）が全て 4 月に落ちる。
+
+/** 開業からの年度（1 始まり） */
+export function fiscalYearOf(month: Month): number {
+  return Math.floor((month - 1) / MONTHS_PER_YEAR) + 1;
+}
+
+/** 年度内の何ヶ月目か（1〜12。1 = 4月） */
+export function monthOfFiscalYear(month: Month): number {
+  return ((month - 1) % MONTHS_PER_YEAR) + 1;
+}
+
+/** 暦の月（1〜12） */
+export function calendarMonthOf(month: Month): number {
+  return ((monthOfFiscalYear(month) + 2) % MONTHS_PER_YEAR) + 1;
+}
+
+/** 年度内の四半期（1〜4）。四半期の帳票を出すときに使う */
+export function quarterOfFiscalYear(month: Month): number {
+  return Math.floor((monthOfFiscalYear(month) - 1) / MONTHS_PER_QUARTER) + 1;
+}
+
+/** 通算の四半期インデックス（1 始まり）。検証データとの突き合わせに使う */
+export function quarterIndexOf(month: Month): number {
+  return Math.floor((month - 1) / MONTHS_PER_QUARTER) + 1;
+}
+
+/** 画面に出すラベル。「2年目 10月」 */
+export function monthLabel(month: Month): string {
+  return `${fiscalYearOf(month)}年目 ${calendarMonthOf(month)}月`;
+}
+
+/** 内部用の短いラベル。ログとテストの見出し用 */
+export function monthCode(month: Month): string {
+  return `Y${fiscalYearOf(month)}M${String(monthOfFiscalYear(month)).padStart(2, '0')}`;
 }

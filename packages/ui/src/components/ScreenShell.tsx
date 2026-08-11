@@ -16,12 +16,14 @@
  * 画面ブランチではこのファイルを編集しない（CLAUDE.md §3）。
  * 変更が必要なら issue を立てて main で対応する。
  */
+import type * as React from 'react';
 import type { ReactNode } from 'react';
+import { CloseIcon } from './icons';
 
 /** tokens.css の領域色に対応 */
 export type Domain =
   | 'hq' | 'igyoku' | 'agency' | 'shikai'
-  | 'hospital' | 'bureau' | 'bank' | 'pharmacy' | 'school';
+  | 'hospital' | 'bureau' | 'bank' | 'pharmacy' | 'school' | 'vendor';
 
 export interface ShellTab {
   id: string;
@@ -49,6 +51,14 @@ export interface ScreenShellProps {
    * 今この画面で見るべきものを名指しする。
    */
   greeting?: string;
+  /**
+   * 操作卓。スクロール領域の外に、下タブのすぐ上へ固定で置かれる。
+   *
+   * ★children の中に sticky で置かないこと。スクロール領域の padding-bottom より
+   * 上で止まってしまい、操作卓と下タブの隙間から本文が透ける。
+   * 主要操作は画面下半分に置く決まりなので（CLAUDE.md §5）、シェル側の席を用意する。
+   */
+  dock?: ReactNode;
   tabs?: ShellTab[];
   activeTabId?: string;
   onTabChange?: (id: string) => void;
@@ -58,24 +68,34 @@ export interface ScreenShellProps {
 
 export function ScreenShell({
   domain, title, subtitle, icon, illustration, portrait, greeting,
-  tabs, activeTabId, onTabChange, onClose, children,
+  dock, tabs, activeTabId, onTabChange, onClose, children,
 }: ScreenShellProps) {
   const surface = `var(--${domain}-surface)`;
   const accent = `var(--${domain}-accent)`;
+  /*
+   * 領域の差し色を CSS 変数として下位へ流す。
+   * こうしておくと、ボタンもグラフも罫線も「訪問先ごとに色が変わる」を
+   * 各画面が意識せずに満たせる。医局＝藍、紹介会社＝琥珀、厚生局＝灰赤。
+   */
+  const domainVars = { '--screen-accent': accent, '--screen-surface': surface } as React.CSSProperties;
 
   return (
     <div
       className="screen-shell"
       style={{
+        ...domainVars,
         position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column',
         background: surface, color: 'var(--paper)', fontFamily: 'var(--font-ui)',
       }}
     >
       <header
         style={{
-          height: 'var(--header-height)', flexShrink: 0,
+          height: `calc(var(--header-height) + var(--safe-top))`,
+          paddingTop: 'var(--safe-top)',
+          flexShrink: 0,
           display: 'grid', gridTemplateColumns: '44px 1fr 44px', alignItems: 'center',
           padding: '0 var(--space-3)', gap: 'var(--space-2)',
+          borderBottom: '1px solid rgba(0,0,0,0.35)',
         }}
       >
         <div aria-hidden style={{ width: 36, height: 36 }}>{icon}</div>
@@ -83,6 +103,7 @@ export function ScreenShell({
           <div
             style={{
               fontFamily: 'var(--font-display)', fontSize: 'var(--text-title)', fontWeight: 600,
+              letterSpacing: '0.04em',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}
           >
@@ -96,15 +117,12 @@ export function ScreenShell({
         </div>
         <button
           type="button"
+          className="btn btn--icon btn--quiet"
           onClick={onClose}
           aria-label="閉じる"
-          style={{
-            background: 'none', border: 'none', color: 'var(--paper)',
-            fontSize: 24, cursor: 'pointer', padding: 'var(--space-2)',
-            justifySelf: 'end', lineHeight: 1,
-          }}
+          style={{ justifySelf: 'end' }}
         >
-          ×
+          <CloseIcon size={18} />
         </button>
       </header>
 
@@ -133,18 +151,19 @@ export function ScreenShell({
 
       <main
         style={{
-          flex: 1, overflowY: 'auto', overscrollBehavior: 'contain',
+          flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain',
           padding: 'var(--space-4)',
-          paddingBottom: `calc(var(--tabbar-height) + var(--safe-bottom) + var(--space-4))`,
         }}
       >
         {children}
       </main>
 
+      {dock}
+
       {tabs && tabs.length > 0 && (
         <nav
           style={{
-            position: 'absolute', left: 0, right: 0, bottom: 0,
+            flexShrink: 0,
             height: `calc(var(--tabbar-height) + var(--safe-bottom))`,
             paddingBottom: 'var(--safe-bottom)',
             display: 'flex', background: 'var(--ink-900)',
@@ -157,16 +176,10 @@ export function ScreenShell({
               <button
                 key={tab.id}
                 type="button"
+                className="tabbar__item"
                 onClick={() => onTabChange?.(tab.id)}
                 aria-current={active ? 'page' : undefined}
-                style={{
-                  flex: 1, display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center', gap: 2,
-                  background: active ? 'var(--ink-800)' : 'transparent',
-                  border: 'none', cursor: 'pointer', position: 'relative',
-                  color: active ? accent : 'var(--paper-dim)',
-                  fontFamily: 'var(--font-ui)', fontSize: 'var(--text-caption)',
-                }}
+                style={active ? { color: 'var(--screen-accent)' } : undefined}
               >
                 <span aria-hidden style={{ width: 26, height: 26 }}>{tab.icon}</span>
                 {tab.label}

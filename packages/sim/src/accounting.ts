@@ -15,7 +15,8 @@
  */
 import {
   CORPORATE_TAX_RATE,
-  RECEIVABLE_QUARTERS,
+  MONTHS_PER_YEAR,
+  RECEIVABLE_MONTHS,
   USEFUL_LIFE_BUILDING,
   USEFUL_LIFE_EQUIPMENT,
   USEFUL_LIFE_INTERIOR,
@@ -29,7 +30,7 @@ import type {
   IncomeStatement,
   Loan,
   Man,
-  Quarter,
+  Month,
 } from './types';
 
 export const USEFUL_LIFE: Record<AssetClass, number> = {
@@ -39,21 +40,21 @@ export const USEFUL_LIFE: Record<AssetClass, number> = {
   intangible: USEFUL_LIFE_INTERIOR,
 };
 
-/** 定額法。四半期あたりの償却費 */
-export function quarterlyDepreciation(asset: FixedAsset): Man {
-  const perQuarter = asset.acquisitionCost / asset.usefulLifeQuarters;
-  return Math.min(perQuarter, asset.bookValue);
+/** 定額法。1ヶ月あたりの償却費 */
+export function monthlyDepreciation(asset: FixedAsset): Man {
+  const perMonth = asset.acquisitionCost / asset.usefulLifeMonths;
+  return Math.min(perMonth, asset.bookValue);
 }
 
-/** 全資産を 1 四半期分償却し、償却費の合計と更新後の資産を返す */
+/** 全資産を 1 ヶ月分償却し、償却費の合計と更新後の資産を返す */
 export function depreciateAll(
   assets: FixedAsset[],
-  quarter: Quarter,
+  month: Month,
 ): { depreciation: Man; assets: FixedAsset[] } {
   let depreciation = 0;
   const next = assets.map((a) => {
-    if (quarter <= a.acquiredAtQuarter) return a;
-    const d = quarterlyDepreciation(a);
+    if (month <= a.acquiredAtMonth) return a;
+    const d = monthlyDepreciation(a);
     depreciation += d;
     return { ...a, bookValue: a.bookValue - d };
   });
@@ -68,7 +69,7 @@ export function bookValueByClass(assets: FixedAsset[]): Record<AssetClass, Man> 
   return out;
 }
 
-/** 借入の利息と元金返済。返済は残高に対する定率 */
+/** 借入の利息と元金返済。返済は残高に対する定率（月あたり） */
 export function serviceLoans(loans: Loan[]): {
   interest: Man;
   principalRepaid: Man;
@@ -77,8 +78,8 @@ export function serviceLoans(loans: Loan[]): {
   let interest = 0;
   let principalRepaid = 0;
   const next = loans.map((l) => {
-    const i = l.outstanding * l.quarterlyRate;
-    const p = Math.min(l.outstanding, l.outstanding * l.quarterlyRepaymentRate);
+    const i = l.outstanding * l.monthlyRate;
+    const p = Math.min(l.outstanding, l.outstanding * l.monthlyRepaymentRate);
     interest += i;
     principalRepaid += p;
     return { ...l, outstanding: l.outstanding - p };
@@ -91,7 +92,7 @@ export function splitDebt(loans: Loan[]): { shortTerm: Man; longTerm: Man } {
   let shortTerm = 0;
   let longTerm = 0;
   for (const l of loans) {
-    const withinYear = Math.min(l.outstanding, l.outstanding * l.quarterlyRepaymentRate * 4);
+    const withinYear = Math.min(l.outstanding, l.outstanding * l.monthlyRepaymentRate * MONTHS_PER_YEAR);
     shortTerm += withinYear;
     longTerm += l.outstanding - withinYear;
   }
@@ -100,11 +101,11 @@ export function splitDebt(loans: Loan[]): { shortTerm: Man; longTerm: Man } {
 
 /** レセプトの入金遅れによる医業未収金 */
 export function receivablesFor(insuranceRevenue: Man): Man {
-  return insuranceRevenue * RECEIVABLE_QUARTERS;
+  return insuranceRevenue * RECEIVABLE_MONTHS;
 }
 
 export interface BuildStatementsInput {
-  quarter: Quarter;
+  month: Month;
   incomeStatement: Omit<IncomeStatement,
     'totalRevenue' | 'totalExpenses' | 'operatingIncome' | 'ordinaryIncome' | 'pretaxIncome' | 'tax' | 'netIncome'>;
   openingCash: Man;
@@ -125,11 +126,12 @@ export function buildStatements(input: BuildStatementsInput): FinancialStatement
   const is = input.incomeStatement;
 
   const totalRevenue =
-    is.insuranceRevenue + is.selfPayRevenue + is.tuitionRevenue + is.rentalRevenue;
+    is.insuranceRevenue + is.selfPayRevenue + is.tuitionRevenue + is.rentalRevenue +
+    is.contractRevenue;
   const totalExpenses =
     is.medicalSupplies + is.doctorPayroll + is.nursePayroll + is.otherPayroll +
     is.rent + is.depreciation + is.schoolOperating + is.agencyFees +
-    is.igyokuRelationCost + is.headquarters;
+    is.igyokuRelationCost + is.externalRelationCost + is.systemCost + is.headquarters;
 
   const operatingIncome = totalRevenue - totalExpenses;
   const ordinaryIncome = operatingIncome - is.interestExpense;
@@ -191,7 +193,7 @@ export function buildStatements(input: BuildStatementsInput): FinancialStatement
     totalEquity,
   };
 
-  return { quarter: input.quarter, incomeStatement, balanceSheet, cashFlow };
+  return { month: input.month, incomeStatement, balanceSheet, cashFlow };
 }
 
 /**

@@ -1,0 +1,69 @@
+/*
+ * 最低限のリセット。トークンは tokens.css。
+ * 縦持ち固定・全画面差し替えという前提なので、スクロールは main の中だけで起きる。
+ */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /*
+   * ★iOS Safari は 100% だとアドレスバーの出入りで高さが変わる。
+   * dvh（動的ビューポート）に対応していない古い版のために 100% も残す。
+   */
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--ink-900);
+  color: var(--paper);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  /* 端まで引っ張ったときの跳ね返り。全画面差し替えの器では邪魔にしかならない */
+  overscroll-behavior: none;
+  /* 横向きにしたとき iOS が本文を勝手に拡大する。縦持ち固定なので止める */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/*
+ * ★iPhone 対策。
+ * - ダブルタップの拡大を止める（月送りを連打すると必ず踏む）
+ * - 長押しの選択メニューを出さない。読ませる文字はここから除外する
+ * - タップの青いハイライトを消す
+ */
+button,
+[role='button'] {
+  font-family: inherit;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 数値の増減が目で追えるように。減速する動きは使わない */
+@keyframes value-flash {
+  from {
+    background: var(--rule-accent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/*
+ * 面のテクスチャ。
+ *
+ * 単色で塗ると「背景が無い」ように見え、情報だけが宙に浮く。
+ * 細い縦縞を極薄で入れると、面として存在するようになる。
+ * **見えるか見えないかの濃さで入れること。** 縞が読めた時点で入れすぎ。
+ */
+.screen-shell {
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.016) 0 1px,
+    transparent 1px 7px
+  );
+}

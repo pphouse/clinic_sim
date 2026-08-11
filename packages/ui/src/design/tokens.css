@@ -15,7 +15,13 @@
  *   数値  = Inter（tabular-nums 必須。桁が揃わないと財務諸表が読めない）
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+/*
+ * 書体は同梱する。Google Fonts を @import していたが、実行環境から
+ * fonts.googleapis.com へ出られず一度も当たっていなかった（全部 IPAGothic に落ちていた）。
+ * 外部CDNの生死にゲームの見た目を預けない。
+ * 作り直す: node packages/ui/scripts/build-fonts.mjs
+ */
+@import './fonts.css';
 
 :root {
   /* --- 基層。墨に僅かに紺を入れた無彩色 */
@@ -37,6 +43,9 @@
   --positive: #4fa97a;
   --negative: #d4645c;
   --warning:  #e0a63c;
+  /* 星。口コミの金色。warning と近いが意味が違うので別に持つ */
+  --star:     #e8b64c;
+  --star-off: #2f3b45;
   --critical: #c4566e;
 
   /* --- 領域色。訪問する建物ごとに面の色と差し色が変わる */
@@ -49,6 +58,7 @@
   --bank-surface:     #10231a;  --bank-accent:     #4fa97a;
   --pharmacy-surface: #16241c;  --pharmacy-accent: #7cc08a;
   --school-surface:   #1a1d2c;  --school-accent:   #8b8ce0;
+  --vendor-surface:   #171f26;  --vendor-accent:   #7f9bb5;  /* 商社＝鋼青。機械の色 */
 
   /* --- 書体 */
   --font-display: 'Zen Old Mincho', serif;
@@ -78,6 +88,8 @@
   --tabbar-height: 64px;
   --header-height: 56px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* ノッチ。ホーム画面に追加してフルスクリーンで開くとステータスバーが被る */
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 /* 数値は必ず等幅数字で。桁がズレると財務諸表が読めない */

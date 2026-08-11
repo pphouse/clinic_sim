@@ -8,27 +8,27 @@
  * 取り返すには要件を満たし直すだけでよいが、落ちている間の収入は戻らない。
  */
 import { ADDONS, FEE_REVISIONS } from './constants';
-import type { Addon, AddonStatus, FeeTick, Quarter } from './types';
+import type { Addon, AddonStatus, FeeTick, Month } from './types';
 
 /** 改定の累積。基準 100 */
-export function feePointIndexAt(quarter: Quarter): number {
+export function feePointIndexAt(month: Month): number {
   let index = 100;
   for (const revision of FEE_REVISIONS) {
-    if (quarter >= revision.effectiveQuarter) index *= 1 + revision.rate;
+    if (month >= revision.effectiveMonth) index *= 1 + revision.rate;
   }
   return index;
 }
 
-/** この四半期に施行された改定 */
-export function feeRevisionAt(quarter: Quarter) {
-  return FEE_REVISIONS.find((r) => r.effectiveQuarter === quarter);
+/** この月に施行された改定 */
+export function feeRevisionAt(month: Month) {
+  return FEE_REVISIONS.find((r) => r.effectiveMonth === month);
 }
 
 export function initialAddonStatuses(): AddonStatus[] {
   return ADDONS.map((a) => ({
     id: a.id,
     acquired: false,
-    acquiredAtQuarter: null,
+    acquiredAtMonth: null,
     active: false,
     lapsedByRequirement: false,
   }));
@@ -46,38 +46,38 @@ export function meetsRequirement(
 }
 
 export interface FeeTickInput {
-  quarter: Quarter;
+  month: Month;
   previous: AddonStatus[];
-  /** この四半期に取得する加算 */
+  /** この月に取得する加算 */
   acquire: string[];
   doctorsTotal: number;
   nurseSufficiency: number;
 }
 
 /**
- * 加算の取得・維持・失効を 1 四半期進める。
- * 取得はその四半期から効く。要件を割った四半期は即座に落ちる（猶予なし）。
+ * 加算の取得・維持・失効を 1 ヶ月進める。
+ * 取得はその月から効く。要件を割った月は即座に落ちる（猶予なし）。
  */
 export function tickFee(input: FeeTickInput): FeeTick {
   const addons: AddonStatus[] = ADDONS.map((addon) => {
     const prev =
       input.previous.find((p) => p.id === addon.id) ??
-      { id: addon.id, acquired: false, acquiredAtQuarter: null, active: false, lapsedByRequirement: false };
+      { id: addon.id, acquired: false, acquiredAtMonth: null, active: false, lapsedByRequirement: false };
     const acquired = prev.acquired || input.acquire.includes(addon.id);
-    const acquiredAtQuarter = prev.acquired
-      ? prev.acquiredAtQuarter
+    const acquiredAtMonth = prev.acquired
+      ? prev.acquiredAtMonth
       : input.acquire.includes(addon.id)
-        ? input.quarter
+        ? input.month
         : null;
 
-    const withinTerm = input.quarter < addon.expiresAtQuarter;
+    const withinTerm = input.month < addon.expiresAtMonth;
     const meets = meetsRequirement(addon, input.doctorsTotal, input.nurseSufficiency);
     const active = acquired && withinTerm && meets;
 
     return {
       id: addon.id,
       acquired,
-      acquiredAtQuarter,
+      acquiredAtMonth,
       active,
       lapsedByRequirement: acquired && withinTerm && !meets,
     };
@@ -89,7 +89,7 @@ export function tickFee(input: FeeTickInput): FeeTick {
     return sum + (addon ? addon.effect : 0);
   }, 0);
 
-  const feePointIndex = feePointIndexAt(input.quarter);
+  const feePointIndex = feePointIndexAt(input.month);
 
   return {
     feePointIndex,
