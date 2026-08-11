@@ -9,7 +9,12 @@ name: deploy
 
 on:
   push:
-    branches: [main]
+    # ★このリポジトリのデフォルトブランチは main ではない。
+    # main だけを見ていると永久に発火しないので、実際のデフォルトブランチも並べる。
+    # main へ寄せたらこの行は消してよい。
+    branches:
+      - main
+      - claude/repository-setup-implementation-xzttcf
   # 手で回せるようにしておく。ブランチを指定して確認したいことがある
   workflow_dispatch:
 

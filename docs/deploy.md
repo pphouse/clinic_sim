@@ -5,16 +5,42 @@
 
 ---
 
-## 1回だけ手で要る設定
+## 配り方は2つ。リポジトリが private かどうかで決まる
 
-GitHub の **Settings → Pages → Source** を「**GitHub Actions**」にする。
-これをしないと `.github/workflows/deploy.yml` が配れない。
+### A. GitHub Pages（リポジトリを public にする場合）
 
-そのあと `main` に push すれば自動でビルドして配られる。URL は
+★**GitHub Pages は private リポジトリだと有料プラン（Pro 以上）が要る。**
+無料プランなら、まずリポジトリを public にする
+（Settings → 一番下 Danger Zone → Change visibility）。
+
+そのうえで **リポジトリの** Settings → Pages → Source を「**GitHub Actions**」にする。
+アカウント設定の Pages ではない（あちらは Verified domains しか無い）：
+
+```
+https://github.com/<ユーザー名>/clinic_sim/settings/pages
+```
+
+そのあとデフォルトブランチへ push すれば自動でビルドして配られる。URL は
 
 ```
 https://<ユーザー名>.github.io/clinic_sim/
 ```
+
+★ワークフローの発火条件は**実際のデフォルトブランチ**に合わせてある
+（`main` とは限らない）。ブランチを整理したら `deploy.yml` の `branches` も直すこと。
+
+### B. Cloudflare Pages（private のまま配る場合）
+
+無料で private リポジトリから配れる。GitHub と連携して：
+
+| 設定 | 値 |
+|---|---|
+| ビルドコマンド | `pnpm install && pnpm --filter @med/ui build` |
+| 出力ディレクトリ | `packages/ui/dist` |
+| 環境変数 | `NODE_VERSION` = `22` |
+
+`base: './'` で相対パスに吐いているので、置き場所を選ばない。
+Netlify / Vercel でも同じ設定で動く。
 
 ワークフローは配る前に `pnpm typecheck` と `pnpm test` を通す。
 **ゴールデンが落ちているものを iPhone に届けない。**
