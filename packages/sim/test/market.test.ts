@@ -107,6 +107,45 @@ describe('魅力', () => {
     const seg = out.tick.districts.find((d) => d.id === 'honmachi')!;
     expect(seg.competitors[0]!.share).toBe(1);
   });
+
+  /**
+   * ★競合の居ないセグメントに医師0の院を出したとき、
+   * 0除算よけが等分に落ちてシェア1を渡していた。
+   * 「看板だけの院に患者は来ない」が、独占のときだけ破れていた。
+   */
+  it('競合が1軒も居なくても、医師0ならシェアは0', () => {
+    const out = tickMarket({
+      month: 1,
+      clinics: [
+        {
+          config: { ...CLINICS[0]!, districtId: 'ekimae', specialtyId: 'hifuka' },
+          open: true,
+          reputation: 75,
+          waitMinutes: 0,
+          doctors: 0,
+        },
+      ],
+      competitors: [],
+    });
+    expect(out.shareByClinic['A']).toBe(0);
+  });
+
+  it('医師を1人置けばシェアは1に戻る。独占は独占のまま', () => {
+    const out = tickMarket({
+      month: 1,
+      clinics: [
+        {
+          config: { ...CLINICS[0]!, districtId: 'ekimae', specialtyId: 'hifuka' },
+          open: true,
+          reputation: 75,
+          waitMinutes: 0,
+          doctors: 1,
+        },
+      ],
+      competitors: [],
+    });
+    expect(out.shareByClinic['A']).toBe(1);
+  });
 });
 
 // ==================================================================

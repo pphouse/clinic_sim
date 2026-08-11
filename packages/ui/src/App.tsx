@@ -22,6 +22,7 @@ import {
   CLINIC_SITES,
   PLAY_SCENARIO,
   createSave,
+  monthDigest,
   runSimulation,
   scenarioFromSave,
   type ClinicId,
@@ -37,6 +38,7 @@ import { MapScreen } from './screens/map/MapScreen';
 import { BuildingScreen } from './screens/buildings/BuildingScreens';
 import { EndingScreen } from './screens/ending/EndingScreen';
 import { OpeningScreen } from './screens/opening/OpeningScreen';
+import { MonthDigestOverlay } from './screens/digest/MonthDigestOverlay';
 import { clearSave, loadSave, writeSave } from './game/storage';
 
 const freshSave = (): SaveData => createSave(PLAY_SCENARIO, 1, PLAY_SCENARIO.decisions);
@@ -52,6 +54,12 @@ export function App() {
   const [endingDismissed, setEndingDismissed] = useState(false);
   /** 開院画面で選んでいる候補地。科をここで決める */
   const [openingSite, setOpeningSite] = useState<ClinicSite | null>(null);
+  /**
+   * ダイジェストを出す月。「翌月へ」で進んだ直後だけ立つ。
+   * ★過去を見に行っただけでは出さない。月が**確定した**ときの手応えだから
+   * （docs/spec/screens/month-digest.md）
+   */
+  const [digestMonth, setDigestMonth] = useState<Month | null>(null);
 
   const run = useMemo(() => runSimulation(scenarioFromSave(PLAY_SCENARIO, save)), [save]);
 
@@ -78,6 +86,7 @@ export function App() {
     const next = save.currentMonth + 1;
     setSave((s) => ({ ...s, currentMonth: next }));
     setViewMonth(next);
+    setDigestMonth(next);
   }
 
   /**
@@ -116,6 +125,7 @@ export function App() {
     setEndingDismissed(false);
     setOpenClinic(null);
     setOpenBuilding(null);
+    setDigestMonth(null);
   }
 
   const setDoctors = (clinicId: ClinicId, next: number) =>
@@ -135,6 +145,19 @@ export function App() {
     );
   }
 
+  /**
+   * 進んだ直後の1回だけ出す。終局した月には出さない（終局画面と2枚重ねない）。
+   * 差分は sim が全部持ってくる。ここで引き算しない（CLAUDE.md §2）
+   */
+  const digest =
+    digestMonth !== null && digestMonth === save.currentMonth && !end.ended && digestMonth > 1
+      ? monthDigest(run.months[digestMonth - 1]!, run.months[digestMonth - 2] ?? null)
+      : null;
+
+  const overlay = digest && (
+    <MonthDigestOverlay digest={digest} onDismiss={() => setDigestMonth(null)} />
+  );
+
   if (openingSite !== null) {
     return (
       <OpeningScreen
@@ -152,61 +175,70 @@ export function App() {
 
   if (openBuilding !== null) {
     return (
-      <BuildingScreen
-        screen={openBuilding}
-        result={result}
-        previous={previous}
-        history={run.months}
-        onClose={() => setOpenBuilding(null)}
-        onDecision={isPresent ? applyDecision : undefined}
-      />
+      <>
+        <BuildingScreen
+          screen={openBuilding}
+          result={result}
+          previous={previous}
+          history={run.months}
+          onClose={() => setOpenBuilding(null)}
+          onDecision={isPresent ? applyDecision : undefined}
+        />
+        {overlay}
+      </>
     );
   }
 
   if (openClinic === null) {
     return (
-      <MapScreen
-        result={result}
-        previous={previous}
-        onOpenClinic={setOpenClinic}
-        onOpenBuilding={setOpenBuilding}
-        onMonthChange={(delta) => goToMonth(month + delta)}
-        currentMonth={save.currentMonth}
-        isPresent={isPresent}
-        onAdvance={advance}
-        onShowEnding={end.ended ? () => setEndingDismissed(false) : undefined}
-        onDecision={isPresent ? applyDecision : undefined}
-        onChooseSite={
-          isPresent
-            ? (id) => setOpeningSite(CLINIC_SITES.find((s) => s.id === id) ?? null)
-            : undefined
-        }
-        canGoBack={month > 1}
-        canGoForward={month < maxViewMonth}
-      />
+      <>
+        <MapScreen
+          result={result}
+          previous={previous}
+          onOpenClinic={setOpenClinic}
+          onOpenBuilding={setOpenBuilding}
+          onMonthChange={(delta) => goToMonth(month + delta)}
+          currentMonth={save.currentMonth}
+          isPresent={isPresent}
+          onAdvance={advance}
+          onShowEnding={end.ended ? () => setEndingDismissed(false) : undefined}
+          onDecision={isPresent ? applyDecision : undefined}
+          onChooseSite={
+            isPresent
+              ? (id) => setOpeningSite(CLINIC_SITES.find((s) => s.id === id) ?? null)
+              : undefined
+          }
+          canGoBack={month > 1}
+          canGoForward={month < maxViewMonth}
+        />
+        {overlay}
+      </>
     );
   }
 
   return (
-    <ClinicScreen
-      clinicId={openClinic}
-      clinicName={clinicName}
-      result={result}
-      previous={previous}
-      history={run.months}
-      tab={tab}
-      onTabChange={setTab}
-      onClose={() => setOpenClinic(null)}
-      onOpenBuilding={(id) => {
-        setOpenClinic(null);
-        setOpenBuilding(id);
-      }}
-      onDoctorsChange={isPresent ? (next) => setDoctors(openClinic, next) : undefined}
-      onMonthChange={(delta) => goToMonth(month + delta)}
-      canGoBack={month > 1}
-      canGoForward={month < maxViewMonth}
-      modified={false}
-      onReset={restart}
-    />
+    <>
+      <ClinicScreen
+        clinicId={openClinic}
+        clinicName={clinicName}
+        result={result}
+        previous={previous}
+        history={run.months}
+        tab={tab}
+        onTabChange={setTab}
+        onClose={() => setOpenClinic(null)}
+        onOpenBuilding={(id) => {
+          setOpenClinic(null);
+          setOpenBuilding(id);
+        }}
+        onDoctorsChange={isPresent ? (next) => setDoctors(openClinic, next) : undefined}
+        onMonthChange={(delta) => goToMonth(month + delta)}
+        canGoBack={month > 1}
+        canGoForward={month < maxViewMonth}
+        modified={false}
+        onReset={restart}
+      />
+      {overlay}
+    </>
   );
 }

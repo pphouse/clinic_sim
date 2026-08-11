@@ -122,9 +122,16 @@ export function tickMarket(input: MarketInput): MarketOutcome {
         clinicPower.reduce((sum, c) => sum + c.power, 0) +
         rivals.reduce((sum, r) => sum + r.strength, 0);
 
-      // 魅力の合計が 0（開院直後で評判も待ち時間も無い）なら等分。0除算よけ
-      const shareOf = (power: number) =>
-        total > 0 ? power / total : 1 / (clinics.length + rivals.length);
+      /*
+       * 0除算よけ。
+       *
+       * ★以前はここで等分していたが、それは間違いだった。
+       * 魅力の合計が 0 になるのは**そのセグメントの誰にも診察できる医師が居ない**とき
+       * （評判は下限でも 20 あるので、0 になるのは医師0名の院だけ）。
+       * 等分すると、医師を1人も置いていない空の院にシェア1が渡り、
+       * 患者が来てしまう。§50 の「看板だけの院に患者は来ない」と矛盾する。
+       */
+      const shareOf = (power: number) => (total > 0 ? power / total : 0);
 
       const clinicViews: DistrictClinicView[] = clinicPower.map(({ clinic, power }) => {
         const share = shareOf(power);

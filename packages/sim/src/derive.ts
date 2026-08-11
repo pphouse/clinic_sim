@@ -333,6 +333,134 @@ export function groupSummary(result: MonthResult, previous: MonthResult | null):
   };
 }
 
+// ---------------------------------------------------------------- 月次ダイジェスト
+//
+// docs/spec/screens/month-digest.md
+//
+// ★「翌月へ」を押した結果が、どこにも出ていなかった。
+// マップの数字が静かに書き変わるだけなので、10回押しても何が起きたか分からない。
+// このゲームの主題は遅延なので、押した結果が見えないのは致命的に相性が悪い。
+//
+// **何を出すかを決めるのはここ。** UI は並べて動かすだけ（CLAUDE.md §2）。
+
+export type DigestUnit = 'people' | 'man' | 'minutes' | 'stars';
+
+export interface DigestLine {
+  id: string;
+  label: string;
+  /** 今月の値 */
+  value: number;
+  /** 前月の値。UI はここから今月の値へ数え上げる */
+  from: number;
+  delta: number;
+  unit: DigestUnit;
+  /**
+   * 増えるのが良いか。★向きを sim が持つ。
+   * 待ち時間だけ逆なので、UI 側に「待ち時間は増えたら赤」と書くと別の画面で必ず忘れる
+   */
+  higherIsBetter: boolean;
+}
+
+export interface MonthDigest {
+  month: Month;
+  lines: DigestLine[];
+  /** その月の出来事。これまで通知はマップのバッジにしか出ていなかった */
+  events: GameEvent[];
+  /** いちばん大きく動いた行から作る一言 */
+  headline: string;
+}
+
+/** 単位ごとの動詞。「待ち時間が増えた」より「待ち時間が伸びた」の方が速く読める */
+const DIGEST_VERB: Record<DigestUnit, [up: string, down: string]> = {
+  people: ['増えた', '減った'],
+  man: ['伸びた', '沈んだ'],
+  minutes: ['伸びた', '縮んだ'],
+  stars: ['上がった', '下がった'],
+};
+
+/** これ未満の相対変化しかなければ「変化なし」。桁の違う指標を比べるので比率で見る */
+const DIGEST_HEADLINE_THRESHOLD = 0.02;
+
+export function monthDigest(current: MonthResult, previous: MonthResult | null): MonthDigest {
+  const openNow = current.clinics.some((c) => c.open);
+  const worstNow = worstWait(current);
+  const worstBefore = previous ? worstWait(previous) : null;
+
+  const line = (
+    id: string,
+    label: string,
+    unit: DigestUnit,
+    higherIsBetter: boolean,
+    value: number,
+    from: number,
+  ): DigestLine => ({ id, label, unit, higherIsBetter, value, from, delta: value - from });
+
+  const lines: DigestLine[] = [
+    line(
+      'patientStock',
+      '通院患者',
+      'people',
+      true,
+      totalPatientStock(current),
+      previous ? totalPatientStock(previous) : 0,
+    ),
+    line(
+      'operatingIncome',
+      '営業利益',
+      'man',
+      true,
+      deriveGroupTotals(current).operatingIncome,
+      previous ? deriveGroupTotals(previous).operatingIncome : 0,
+    ),
+    line(
+      'cash',
+      '現金',
+      'man',
+      true,
+      current.financials.balanceSheet.cash,
+      previous ? previous.financials.balanceSheet.cash : current.financials.balanceSheet.cash,
+    ),
+  ];
+
+  // 診療所が1つも開いていない月は待ち時間も評判も意味を持たない。行ごと落とす
+  if (openNow && worstNow) {
+    lines.push(
+      line('waitMinutes', '待ち時間', 'minutes', false, worstNow.waitMinutes, worstBefore?.waitMinutes ?? worstNow.waitMinutes),
+      line(
+        'reputation',
+        '評判',
+        'stars',
+        true,
+        reputationStars(groupReputation(current)),
+        previous ? reputationStars(groupReputation(previous)) : reputationStars(groupReputation(current)),
+      ),
+    );
+  }
+
+  return {
+    month: current.month,
+    lines,
+    events: current.events,
+    headline: digestHeadline(lines),
+  };
+}
+
+function digestHeadline(lines: DigestLine[]): string {
+  let best: DigestLine | null = null;
+  let bestScore = 0;
+  for (const l of lines) {
+    // 現金100万と患者100人は比べられないので、前月比の比率で見る
+    const score = Math.abs(l.delta) / Math.max(Math.abs(l.from), 1);
+    if (score > bestScore) {
+      bestScore = score;
+      best = l;
+    }
+  }
+  if (!best || bestScore < DIGEST_HEADLINE_THRESHOLD) return '大きな動きは無い';
+  const [up, down] = DIGEST_VERB[best.unit];
+  return `${best.label}が${best.delta > 0 ? up : down}`;
+}
+
 // ---------------------------------------------------------------- 看護学校
 
 /**

@@ -66,9 +66,6 @@
  * 差し色は領域変数から取る。医局なら藍、紹介会社なら琥珀に自動で変わる
  */
 .btn--primary {
-  width: 52px;
-  min-width: 52px;
-  height: 52px;
   border-color: color-mix(in srgb, var(--screen-accent, var(--hq-accent)) 34%, var(--ink-600));
   background: linear-gradient(180deg, #26333e 0%, #1a242d 100%);
   color: var(--screen-accent, var(--hq-accent));
@@ -76,11 +73,27 @@
 
 /* 副操作。月送りのように「見る場所を変えるだけ」のボタン */
 .btn--quiet {
+  color: var(--paper-dim);
+  background: linear-gradient(180deg, var(--ink-800) 0%, var(--ink-900) 100%);
+}
+
+/*
+ * ★大きさは「アイコンのとき」だけ決める。
+ *
+ * 以前は .btn--primary が 52px 固定で、文字を入れたボタン（「科を選ぶ」「翌月へ」）が
+ * 箱からはみ出していた。階層（primary / quiet）は**色の話**であって、
+ * 幅の話ではない。幅はアイコンかどうかで決まる。
+ */
+.btn--icon.btn--primary {
+  width: 52px;
+  min-width: 52px;
+  height: 52px;
+}
+
+.btn--icon.btn--quiet {
   width: 40px;
   min-width: 40px;
   height: 40px;
-  color: var(--paper-dim);
-  background: linear-gradient(180deg, var(--ink-800) 0%, var(--ink-900) 100%);
 }
 
 /* 文字だけのリンク的なボタン */
@@ -203,6 +216,65 @@
 
 @media (prefers-reduced-motion: reduce) {
   .value-changed {
+    animation: none;
+  }
+}
+
+/*
+ * 月次ダイジェスト。docs/spec/screens/month-digest.md
+ *
+ * 月を進めたことに手応えを与えるためだけの動き。
+ * **一方向に、一度だけ。** 往復させると「まだ動いている」ように見えて、
+ * 次の月へ進む手が止まる。
+ */
+@keyframes digest-veil {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes digest-head {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes digest-line {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.digest-veil {
+  animation: digest-veil 180ms ease-out;
+}
+
+.digest-head {
+  animation: digest-head 260ms ease-out both;
+}
+
+/* both を付けないと、遅延中の1フレームだけ最終位置で出てしまう */
+.digest-line {
+  animation: digest-line 300ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .digest-veil,
+  .digest-head,
+  .digest-line {
     animation: none;
   }
 }

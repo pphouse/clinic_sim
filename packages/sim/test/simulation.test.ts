@@ -15,7 +15,9 @@ import {
   congestionOf,
   deriveGroupTotals,
   groupSummary,
+  monthDigest,
   reputationStars,
+  totalPatientStock,
 } from '../src/derive';
 import { CRITICAL_WAIT_MINUTES } from '../src/events';
 import { TOLERABLE_WAIT_MINUTES } from '../src/constants';
@@ -233,6 +235,64 @@ describe('マップが読む値', () => {
     const summary = groupSummary(shortage, run.months[shortage.month - 2] ?? null);
     expect(summary.cash).toBeLessThan(0);
     expect(summary.patientStock).toBeGreaterThan(0);
+  });
+});
+
+// ==================================================================
+// 月次ダイジェスト（docs/spec/screens/month-digest.md）
+// ==================================================================
+
+describe('月を進めた結果のダイジェスト', () => {
+  it('前月からの差分を持つ。UI は引き算をしない', () => {
+    const d = monthDigest(run.months[19]!, run.months[18]!);
+    const stock = d.lines.find((l) => l.id === 'patientStock')!;
+    expect(stock.from).toBeCloseTo(totalPatientStock(run.months[18]!), 6);
+    expect(stock.value).toBeCloseTo(totalPatientStock(run.months[19]!), 6);
+    expect(stock.delta).toBeCloseTo(stock.value - stock.from, 6);
+  });
+
+  it('★増減の善し悪しは sim が持つ。待ち時間だけ向きが逆', () => {
+    const d = monthDigest(run.months[19]!, run.months[18]!);
+    expect(d.lines.find((l) => l.id === 'waitMinutes')!.higherIsBetter).toBe(false);
+    expect(d.lines.find((l) => l.id === 'patientStock')!.higherIsBetter).toBe(true);
+    expect(d.lines.find((l) => l.id === 'cash')!.higherIsBetter).toBe(true);
+  });
+
+  it('見出しはいちばん大きく動いた行から作る。桁が違うので比率で比べる', () => {
+    const relative = (l: { delta: number; from: number }) =>
+      Math.abs(l.delta) / Math.max(Math.abs(l.from), 1);
+    for (const month of [20, 40, 60, 80]) {
+      const d = monthDigest(run.months[month - 1]!, run.months[month - 2]!);
+      const biggest = d.lines.reduce((a, b) => (relative(b) > relative(a) ? b : a));
+      expect(d.headline).toContain(biggest.label);
+    }
+  });
+
+  it('動いていない月は「変化なし」。+0 と出すと動いたように見える', () => {
+    const same = run.months[40]!;
+    expect(monthDigest(same, same).headline).toBe('大きな動きは無い');
+  });
+
+  it('減ったときは減ったと言う。単位ごとに動詞を変える', () => {
+    // 患者が減る月を探す（待ち時間が跳ねたあと、遅れて効いてくる）
+    const i = run.months.findIndex(
+      (m, k) => k > 0 && totalPatientStock(m) < totalPatientStock(run.months[k - 1]!) * 0.97,
+    );
+    expect(i).toBeGreaterThan(0);
+    const d = monthDigest(run.months[i]!, run.months[i - 1]!);
+    expect(d.lines.find((l) => l.id === 'patientStock')!.delta).toBeLessThan(0);
+  });
+
+  it('その月の出来事をそのまま持つ。月送りで踏み潰されない', () => {
+    const noisy = run.months.find((m) => m.events.length > 0)!;
+    const d = monthDigest(noisy, run.months[noisy.month - 2] ?? null);
+    expect(d.events).toEqual(noisy.events);
+  });
+
+  it('診療所が1つも開いていない月は待ち時間と評判の行を出さない', () => {
+    const empty = runSimulation({ ...PLAY_SCENARIO, clinics: [], decisions: [] });
+    const d = monthDigest(empty.months[1]!, empty.months[0]!);
+    expect(d.lines.map((l) => l.id)).toEqual(['patientStock', 'operatingIncome', 'cash']);
   });
 });
 

@@ -38,17 +38,31 @@ const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
 const currentMonth = async () =>
   Number(await page.getByTestId('month-label').getAttribute('data-month'));
 
+/** 月次ダイジェストが出ていたら閉じる。出ていなければ何もしない */
+async function dismissDigest() {
+  const digest = page.getByTestId('month-digest');
+  if (await digest.count()) {
+    await digest.click({ position: { x: 8, y: 8 } });
+    await page.waitForTimeout(60);
+  }
+}
+
 /**
  * 月を進める。**戻れないので、進めた分だけ確定する。**
  * 終局すると「翌月へ」が消えるので、そこで止まる（消えたことが終わりの合図）。
+ *
+ * ★進めるたびにダイジェストが被さる。出来事があると自動では消えないので、
+ * 次の月へ行く前に必ず閉じる。
  */
 async function advance(count) {
   for (let i = 0; i < count; i++) {
+    await dismissDigest();
     const button = page.getByTestId('advance');
     if ((await button.count()) === 0) return i;
     await button.click();
     await page.waitForTimeout(40);
   }
+  await dismissDigest();
   return count;
 }
 
@@ -94,7 +108,13 @@ await visit('referralHospital', async () => {
   await shot('05-referral');
 });
 
-await advance(6);
+// --- 3b. ★月を進めた手応え。何がどれだけ動いたかをダイジェストで出す
+await page.getByTestId('advance').click();
+await beat(1400);
+await shot('05b-digest');
+await dismissDigest();
+
+await advance(5);
 await beat(800);
 await shot('06-m07');
 
