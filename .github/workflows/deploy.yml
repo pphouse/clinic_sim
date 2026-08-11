@@ -33,9 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # ★バージョンを書かない。ルートの package.json の packageManager を読む。
+      # 両方に書くと action-setup が「2箇所で指定されている」と言って落ちる。
+      # 版の出どころは package.json ひとつに保つ
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
