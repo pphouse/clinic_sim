@@ -236,9 +236,9 @@ describe('医師の調達', () => {
 
 describe('銀行', () => {
   it('引いた月に現金が増え、借入残高が増える', () => {
-    const without = rich([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    const without = rich([{ month: 1, doctorsByClinic: { A: 2 } }]);
     const withLoan = rich([
-      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 5000 },
     ]);
     expect(at(withLoan, 25).financials.cashFlow.newBorrowing).toBe(5000);
@@ -249,7 +249,7 @@ describe('銀行', () => {
 
   it('★純資産の倍率で頭打ちになる。青天井には借りられない', () => {
     const run = rich([
-      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 9_999_999 },
     ]);
     const before = at(run, 24).financials.balanceSheet;
@@ -259,9 +259,9 @@ describe('銀行', () => {
   });
 
   it('利息が乗る。借りたぶんだけ毎月の経常が重くなる', () => {
-    const without = rich([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    const without = rich([{ month: 1, doctorsByClinic: { A: 2 } }]);
     const withLoan = rich([
-      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 5000 },
     ]);
     expect(at(withLoan, 30).financials.incomeStatement.interestExpense).toBeGreaterThan(
@@ -271,7 +271,7 @@ describe('銀行', () => {
 
   it('借入残高の合計が取れる', () => {
     const run = rich([
-      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 3000 },
     ]);
     expect(totalOutstanding(run.finalState.loans)).toBeGreaterThan(0);
@@ -325,15 +325,16 @@ describe('ゴール', () => {
     expect(GOALS.map((g) => g.id).sort()).toEqual(['corporate', 'personalWealth', 'scale']);
   });
 
-  it('★何もしなければどれも届かない', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+  it('★1院を開いて放っておくだけでは、どれも届かない', () => {
+    // 常勤医2名は1院で黒字になる唯一の配置。それでも10年で1本も届かない
+    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
     const last = at(run, 120);
     expect(last.goals.goals.every((g) => !g.achieved)).toBe(true);
     expect(last.goals.end.reason).toBe('timeUp');
   });
 
   it('内部留保は資本金を含めない。含めると「何もしない」が6割に見える', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
     const last = at(run, 120);
     const corporate = last.goals.goals.find((g) => g.id === 'corporate')!;
     expect(corporate.value).toBeCloseTo(last.financials.balanceSheet.retainedEarnings, 6);
@@ -393,10 +394,19 @@ describe('終局', () => {
    * 債務超過だけで殺すと、正しく立ち上げた人が正しさの途中で死ぬ。
    */
   it('債務超過でも黒字なら潰れない。返している最中と潰れているのは違う', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
-    const late = at(run, 100);
-    expect(late.financials.balanceSheet.totalEquity).toBeLessThan(0);
-    expect(late.financials.incomeStatement.ordinaryIncome).toBeGreaterThan(0);
+    // ★突発事象を切る。見たいのは判定の規則であって、運の良し悪しではない
+    const run = runSimulation({
+      ...PLAY_SCENARIO,
+      features: {},
+      decisions: withOpeningA([{ month: 1, doctorsByClinic: { A: 2 } }]),
+    });
+    // ★月を固定しない。突発事象で前後するので、**そういう月が実際にあること**を見る
+    const insolventButProfitable = run.months.filter(
+      (m) =>
+        m.financials.balanceSheet.totalEquity < 0 &&
+        m.financials.incomeStatement.ordinaryIncome > 0,
+    );
+    expect(insolventButProfitable.length).toBeGreaterThan(12);
     expect(at(run, 120).goals.end.reason).toBe('timeUp');
   });
 
@@ -414,12 +424,19 @@ describe('終局', () => {
   });
 
   it('債務超過から戻れば猶予は 0 に戻る', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    // 2院まで広げて黒字化した筋。120ヶ月目には数えが止まっている
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 2 } },
+      {
+        month: 25, openClinic: 'B', openSpecialty: 'hifuka',
+        doctorsByClinic: { B: 2 }, agencyHires: 2, marketingByClinic: { B: 'web' },
+      },
+    ]);
     expect(at(run, 120).goals.end.insolventMonths).toBe(0);
   });
 
   it('120ヶ月まで生き残れば timeUp で終わる', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
     expect(at(run, 120).goals.end.ended).toBe(true);
     expect(at(run, 120).goals.end.reason).toBe('timeUp');
     expect(at(run, 119).goals.end.ended).toBe(false);

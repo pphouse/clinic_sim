@@ -5,6 +5,10 @@
  * 「複数画面で使う数字」は例外なくこのファイルに置く。
  */
 import {
+  AWARENESS_BASE,
+  AWARENESS_MAX,
+  MARKETING_LEVELS,
+  marketingLevelOf,
   CLINICS,
   EMR_TIERS,
   MONTHS_PER_YEAR,
@@ -13,6 +17,7 @@ import {
   REPUTATION_MIN,
   TOLERABLE_WAIT_MINUTES,
   emrMigrationCost,
+  districtDemand,
 } from './constants';
 import { SCHOOL_DURATION_MONTHS, SCHOOL_GRADUATES_PER_CLASS, enrolledClasses } from './staff';
 import { CRITICAL_WAIT_MINUTES } from './events';
@@ -23,6 +28,7 @@ import type {
   ExternalRelationId,
   GameEvent,
   Man,
+  MarketingLevelId,
   Month,
   MonthResult,
   RelationView,
@@ -331,6 +337,137 @@ export function groupSummary(result: MonthResult, previous: MonthResult | null):
     cashDelta: previous ? cash - previous.financials.balanceSheet.cash : null,
     operatingIncome: deriveGroupTotals(result).operatingIncome,
   };
+}
+
+// ---------------------------------------------------------------- 競合の詳細
+//
+// docs/spec/screens/map.md「競合の詳細」
+
+export interface CompetitorDetail {
+  id: string;
+  name: string;
+  districtId: string;
+  districtName: string;
+  specialtyName: string;
+  /** 競合の魅力。自院の魅力と直接比べられる数字 */
+  strength: number;
+  share: number;
+  openedAtMonth: Month;
+  /** 押し込めていれば「あと何ヶ月で出ていくか」。押し込めていなければ null */
+  monthsToExit: number | null;
+  /** そのセグメントを独占したときの月の新規患者 */
+  segmentDemand: number;
+  /** そのセグメントに居る自院 */
+  ownClinics: { id: ClinicId; name: string; share: number; attractiveness: number }[];
+  /** 自院の魅力の合計。strength と並べて出す */
+  ownAttractiveness: number;
+  ownShare: number;
+  /** 同じセグメントの競合すべて（この競合を含む） */
+  rivals: { id: string; name: string; strength: number; share: number }[];
+}
+
+/**
+ * 競合1軒の詳細。マップでピンを押したときに出す。
+ *
+ * ★**「勝てるのか」に答えるための数字だけを出す。**
+ * 強さと自院の魅力を並べ、押し込みの残り月数を出す。
+ * 商圏の需要を出すのは「取ったらいくらになるか」が判断の材料になるから。
+ */
+export function competitorDetail(
+  result: MonthResult,
+  rivalId: string,
+): CompetitorDetail | null {
+  const segment = result.market.districts.find((d) =>
+    d.competitors.some((c) => c.id === rivalId),
+  );
+  const rival = segment?.competitors.find((c) => c.id === rivalId);
+  if (!segment || !rival) return null;
+
+  const ownAttractiveness = segment.clinics.reduce((sum, c) => sum + c.attractiveness, 0);
+  return {
+    id: rival.id,
+    name: rival.name,
+    districtId: segment.id,
+    districtName: segment.name,
+    specialtyName: segment.specialtyName,
+    strength: rival.strength,
+    share: rival.share,
+    openedAtMonth: rival.openedAtMonth,
+    monthsToExit: rival.monthsToExit,
+    segmentDemand: districtDemand(segment.id, segment.specialtyId),
+    ownClinics: segment.clinics.map((c) => ({
+      id: c.id,
+      name: c.name,
+      share: c.share,
+      attractiveness: c.attractiveness,
+    })),
+    ownAttractiveness,
+    ownShare: segment.ownShare,
+    rivals: segment.competitors.map((c) => ({
+      id: c.id,
+      name: c.name,
+      strength: c.strength,
+      share: c.share,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------- 集患
+//
+// docs/spec/07-awareness.md
+
+export interface MarketingOption {
+  id: MarketingLevelId;
+  name: string;
+  character: string;
+  costPerMonth: Man;
+  /** この段階に切り替えたときの認知度の落ち着き先 */
+  ceiling: number;
+  current: boolean;
+}
+
+export interface AwarenessView {
+  awareness: number;
+  /** いまの段階での落ち着き先 */
+  ceiling: number;
+  level: MarketingLevelId;
+  costPerMonth: Man;
+  /** 口コミのぶん。患者が増えると自然に上がる分 */
+  wordOfMouth: number;
+  options: MarketingOption[];
+}
+
+/**
+ * 集患の現在地。診療所画面が読む。
+ *
+ * ★段階を切り替えたときの落ち着き先まで出す。**選ぶ前に効き目が見えないと選べない。**
+ * 口コミのぶんは ClinicTick から逆算する（同じ院なら段階を変えても口コミは変わらない）。
+ */
+export function awarenessView(tick: ClinicTick): AwarenessView {
+  const wordOfMouth = Math.max(
+    0,
+    tick.awarenessCeiling - AWARENESS_BASE - marketingLevelOf(tick.marketingLevel).reach,
+  );
+  return {
+    awareness: tick.awareness,
+    ceiling: tick.awarenessCeiling,
+    level: tick.marketingLevel,
+    costPerMonth: tick.marketingCost,
+    wordOfMouth,
+    options: MARKETING_LEVELS.map((m) => ({
+      id: m.id,
+      name: m.name,
+      character: m.character,
+      costPerMonth: m.costPerMonth,
+      ceiling: Math.min(AWARENESS_MAX, AWARENESS_BASE + m.reach + wordOfMouth),
+      current: m.id === tick.marketingLevel,
+    })),
+  };
+}
+
+/** 全社の広告宣伝費。UI が合計を出さなくて済むように */
+export function totalMarketingCost(result: MonthResult): Man {
+  return result.financials.incomeStatement.marketing;
 }
 
 // ---------------------------------------------------------------- 月次ダイジェスト

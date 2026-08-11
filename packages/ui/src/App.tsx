@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   CLINIC_SITES,
   PLAY_SCENARIO,
+  competitorDetail,
   createSave,
   monthDigest,
   runSimulation,
@@ -28,6 +29,7 @@ import {
   type ClinicId,
   type ClinicSite,
   type FitoutId,
+  type MarketingLevelId,
   type Month,
   type SpecialtyId,
   type MonthDecision,
@@ -40,6 +42,7 @@ import { BuildingScreen } from './screens/buildings/BuildingScreens';
 import { EndingScreen } from './screens/ending/EndingScreen';
 import { OpeningScreen } from './screens/opening/OpeningScreen';
 import { MonthDigestOverlay } from './screens/digest/MonthDigestOverlay';
+import { CompetitorScreen } from './screens/map/CompetitorScreen';
 import { clearSave, loadSave, writeSave } from './game/storage';
 
 const freshSave = (): SaveData => createSave(PLAY_SCENARIO, 1, PLAY_SCENARIO.decisions);
@@ -61,6 +64,8 @@ export function App() {
    * （docs/spec/screens/month-digest.md）
    */
   const [digestMonth, setDigestMonth] = useState<Month | null>(null);
+  /** 開いている競合。マップのピンから入る */
+  const [openCompetitor, setOpenCompetitor] = useState<string | null>(null);
 
   const run = useMemo(() => runSimulation(scenarioFromSave(PLAY_SCENARIO, save)), [save]);
 
@@ -107,6 +112,7 @@ export function App() {
           ...patch,
           // 書いた分だけ上書きする。丸ごと置き換えない
           doctorsByClinic: { ...existing.doctorsByClinic, ...patch.doctorsByClinic },
+          marketingByClinic: { ...existing.marketingByClinic, ...patch.marketingByClinic },
           relationActivity: { ...existing.relationActivity, ...patch.relationActivity },
         };
         return { ...s, decisions: updated };
@@ -127,6 +133,7 @@ export function App() {
     setOpenClinic(null);
     setOpenBuilding(null);
     setDigestMonth(null);
+    setOpenCompetitor(null);
   }
 
   const setDoctors = (clinicId: ClinicId, next: number) =>
@@ -158,6 +165,18 @@ export function App() {
   const overlay = digest && (
     <MonthDigestOverlay digest={digest} onDismiss={() => setDigestMonth(null)} />
   );
+
+  const competitor =
+    openCompetitor !== null ? competitorDetail(result, openCompetitor) : null;
+  if (competitor) {
+    return (
+      <CompetitorScreen
+        detail={competitor}
+        currentMonth={result.month}
+        onClose={() => setOpenCompetitor(null)}
+      />
+    );
+  }
 
   if (openingSite !== null) {
     return (
@@ -213,6 +232,7 @@ export function App() {
               ? (id) => setOpeningSite(CLINIC_SITES.find((s) => s.id === id) ?? null)
               : undefined
           }
+          onOpenCompetitor={setOpenCompetitor}
           canGoBack={month > 1}
           canGoForward={month < maxViewMonth}
         />
@@ -237,6 +257,12 @@ export function App() {
           setOpenBuilding(id);
         }}
         onDoctorsChange={isPresent ? (next) => setDoctors(openClinic, next) : undefined}
+        onMarketingChange={
+          isPresent
+            ? (level: MarketingLevelId) =>
+                applyDecision({ marketingByClinic: { [openClinic]: level } })
+            : undefined
+        }
         onMonthChange={(delta) => goToMonth(month + delta)}
         canGoBack={month > 1}
         canGoForward={month < maxViewMonth}

@@ -17,6 +17,7 @@ import type {
   ExternalRelationId,
   FitoutId,
   Man,
+  MarketingLevelId,
   Month,
   SpecialtyId,
 } from './types';
@@ -86,6 +87,12 @@ export interface MonthDecision {
    * （docs/spec/06-opening.md §4）。
    */
   openFitout?: FitoutId;
+  /**
+   * 院ごとの集患投資（docs/spec/07-awareness.md §3）。
+   * 書いた院だけが変わり、書かなかった院は据え置き。**省略時は「なし」。**
+   * 既定シナリオは1つも書いていないので、追加しても検証済みの結果は動かない。
+   */
+  marketingByClinic?: Partial<Record<ClinicId, MarketingLevelId>>;
   /** 銀行から引く額（万円）。純資産の BANK_LEVERAGE_LIMIT 倍を超えると断られる */
   borrow?: Man;
   /**
@@ -133,6 +140,14 @@ export interface Scenario {
    * 既定シナリオが省略しているので、シェアは常に 1 で検証済みの式のまま。
    */
   competitors?: CompetitorSpec[];
+  /**
+   * 本部費を開院済みの院数で按分するか（上限は満額）。
+   * ★**省略すると按分しない＝検証済みの固定値のまま。**
+   *
+   * 本編だけ true。1院で始まる形にしたとき、3院ぶんの本部費 83万/月 が
+   * そのまま乗って、**どんな開き方をしても1院では黒字にならなかった**。
+   */
+  scaledHeadquarters?: boolean;
   features?: ScenarioFeatures;
 }
 
@@ -207,6 +222,7 @@ export const PLAY_SCENARIO: Scenario = {
   // ★常勤医1名ぶん。7.5名は3院ぶんの数で、開業初日から払える給料ではない
   initialNurses: 2.5,
   initialCash: OPENING_OWN_FUNDS,
+  scaledHeadquarters: true,
   // 院は無い。立地も科も内装も、全部プレイヤーが選ぶ
   clinics: [],
   competitors: INITIAL_COMPETITORS,

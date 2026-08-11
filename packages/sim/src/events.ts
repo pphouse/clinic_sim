@@ -29,6 +29,12 @@ export interface EventInput {
   graduatedNurses: number;
 }
 
+/**
+ * これを下回っていて集患投資が0なら通知する。
+ * 基礎の 0.4 に口コミが少し乗った程度までは「打っていないだけ」だと分かるように
+ */
+const AWARENESS_NOTICE = 0.55;
+
 export function collectEvents(input: EventInput): GameEvent[] {
   const events: GameEvent[] = [];
   const q = input.month;
@@ -55,6 +61,22 @@ export function collectEvents(input: EventInput): GameEvent[] {
         screen: 'clinic',
         title: `${name}：待ち時間 ${clinic.waitMinutes.toFixed(0)} 分`,
         body: `許容 ${TOLERABLE_WAIT_MINUTES} 分を超えた。超過分だけ評判が落ち、離脱率が上がる。`,
+      });
+    }
+    /*
+     * ★集患（docs/spec/07-awareness.md）。
+     * 「知られていない」は待ち時間と違って画面に赤く出ない。
+     * **黙っていると気づかないまま10年終わる**ので、通知の側から名指しする。
+     * 認知度を持たない院（既定シナリオの3院）は awareness が 1 なので出ない。
+     */
+    if (clinic.marketingLevel === 'none' && clinic.awareness < AWARENESS_NOTICE) {
+      push({
+        id: `awareness-${clinic.id}-${q}`,
+        clinicId: clinic.id,
+        severity: 'warning',
+        screen: 'clinic',
+        title: `${name}：まだ ${Math.round(clinic.awareness * 100)}% にしか知られていない`,
+        body: '集患投資をしていないので、商圏のごく一部しか届いていない。評判が良くても、知られていなければ患者は来ない。',
       });
     }
     if (clinic.reputation <= REPUTATION_MIN) {

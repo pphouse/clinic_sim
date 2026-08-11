@@ -47,7 +47,7 @@ import {
   monthlyFromQuarterly,
   specialtyOf,
 } from './constants';
-import type { ClinicConfig, ClinicTick, Man, Month } from './types';
+import type { ClinicConfig, ClinicTick, Man, MarketingLevelId, Month } from './types';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -201,6 +201,16 @@ export interface ClinicTickInput {
    * 省略時は 1 なので、検証済みの式がそのまま残る。
    */
   marketShare?: number;
+  /**
+   * 認知度 0〜1（docs/spec/07-awareness.md）。
+   * 省略時は 1 なので、検証済みの式がそのまま残る。
+   */
+  awareness?: number;
+  /** 表示用。この院の今月の集患投資 */
+  marketingLevel?: MarketingLevelId;
+  marketingCost?: Man;
+  /** 表示用。認知度が向かっている先 */
+  awarenessCeiling?: number;
 }
 
 export function tickClinic(input: ClinicTickInput): ClinicTick {
@@ -226,6 +236,8 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
       waitMinutes: 0, reputation: input.previousReputation, churnRate: 0,
       visitsServed: 0, marketShare: 0, insuranceRevenue: 0, selfPayRevenue: 0,
       operatingCost: 0, operatingIncome: 0,
+      awareness: input.awareness ?? 1, awarenessCeiling: input.awarenessCeiling ?? 1,
+      marketingLevel: 'none', marketingCost: 0,
     };
   }
 
@@ -235,10 +247,16 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
 
   // ポテンシャルは「その商圏を独占したときの新規患者数」。競合が居ればシェアを取られる
   const marketShare = input.marketShare ?? 1;
+  /*
+   * ★認知度（docs/spec/07-awareness.md）。**知られていなければ誰も来ない。**
+   * 認知度を持たない院は 1 なので、既定シナリオでは式が素のまま残る。
+   */
+  const awareness = input.awareness ?? 1;
   const settledNewPatients =
     newPatientsOf(config.newPatientPotential, input.laggedReputation) *
     (input.newPatientMultiplier ?? 1) *
-    marketShare;
+    marketShare *
+    awareness;
   const newPatients =
     settledNewPatients *
     openingRampFactor(
@@ -300,6 +318,10 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
     churnRate,
     visitsServed,
     marketShare,
+    awareness,
+    awarenessCeiling: input.awarenessCeiling ?? 1,
+    marketingLevel: input.marketingLevel ?? 'none',
+    marketingCost: input.marketingCost ?? 0,
     insuranceRevenue,
     selfPayRevenue,
     operatingCost,

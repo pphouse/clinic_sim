@@ -20,7 +20,10 @@ import {
   monthLabel,
   reputationStars,
   unservedVisits,
+  awarenessView,
+  type AwarenessView,
   type ClinicId,
+  type MarketingLevelId,
   type MonthResult,
   type ScreenId,
 } from '@med/sim';
@@ -51,6 +54,8 @@ export interface ClinicScreenProps {
   result: MonthResult;
   /** 建物へ飛ぶ。医師の枠が足りないときに医局・紹介会社へ送るために要る */
   onOpenBuilding?: (id: ScreenId) => void;
+  /** 集患投資の段階を変える。過去の月を見ているときは undefined */
+  onMarketingChange?: (level: MarketingLevelId) => void;
   /** 前月。月初の患者数と増減を出すために読む */
   previous: MonthResult | null;
   /** 推移を描くための全期間。表示中の月までを切って使う */
@@ -407,6 +412,16 @@ export function ClinicScreen(props: ClinicScreenProps) {
 
           {props.tab === 'patients' && (
             <>
+              {/*
+                ★集患（docs/spec/07-awareness.md）。
+                この画面でいちばん上に置く。**知られていなければ誰も来ない**ので、
+                患者数の内訳より先に「どれだけ知られているか」を見せる
+              */}
+              <MarketingSection
+                view={awarenessView(clinic)}
+                onChange={props.onMarketingChange}
+              />
+
               <SectionTitle>患者ストックの増減</SectionTitle>
               <StatRow
                 label="月初の患者"
@@ -618,6 +633,129 @@ export function ClinicScreen(props: ClinicScreenProps) {
       )}
 
     </ScreenShell>
+  );
+}
+
+/**
+ * 集患。docs/spec/07-awareness.md
+ *
+ * ★選ぶ前に効き目が見えないと選べないので、**各段階の落ち着き先を並べて出す。**
+ * 認知度と評判は別物であることが、この節のいちばん伝えたいこと。
+ */
+function MarketingSection({
+  view,
+  onChange,
+}: {
+  view: AwarenessView;
+  onChange?: (level: MarketingLevelId) => void;
+}) {
+  return (
+    <>
+      <SectionTitle>集患</SectionTitle>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 'var(--space-3)',
+          padding: 'var(--space-2) 0 var(--space-3)',
+        }}
+      >
+        <div>
+          <div className="num" style={{ fontSize: 32, fontWeight: 700, lineHeight: 1 }}>
+            {percent(view.awareness, 0)}
+            <span style={{ fontSize: 'var(--text-caption)', fontWeight: 500 }}>%</span>
+          </div>
+          <div style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-dim)', marginTop: 4 }}>
+            認知度
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="num" style={{ fontSize: 'var(--text-body)', color: 'var(--paper-dim)' }}>
+            {percent(view.ceiling, 0)}%
+          </div>
+          <div style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-dim)' }}>
+            いまの頭打ち
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+        {view.options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            data-testid={`marketing-${option.id}`}
+            disabled={!onChange}
+            onClick={() => onChange?.(option.id)}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr auto auto',
+              alignItems: 'center',
+              gap: 'var(--space-3)',
+              width: '100%',
+              textAlign: 'left',
+              padding: 'var(--space-3)',
+              borderRadius: 'var(--radius-md)',
+              border: `1px solid ${option.current ? 'var(--screen-accent, var(--hq-accent))' : 'var(--ink-700)'}`,
+              background: option.current ? 'var(--ink-700)' : 'var(--ink-800)',
+              color: 'var(--paper)',
+              opacity: onChange ? 1 : 0.6,
+              cursor: onChange ? 'pointer' : 'default',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 'var(--text-label)', fontWeight: 600 }}>
+                {option.name}
+              </span>
+              <span
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--text-caption)',
+                  color: 'var(--paper-mute)',
+                  lineHeight: 1.5,
+                }}
+              >
+                {option.character}
+              </span>
+            </span>
+            <span className="num" style={{ fontSize: 'var(--text-label)', whiteSpace: 'nowrap' }}>
+              {option.costPerMonth === 0 ? '—' : `${man(option.costPerMonth)}万/月`}
+            </span>
+            <span
+              className="num"
+              style={{
+                fontSize: 'var(--text-label)',
+                color: 'var(--positive)',
+                whiteSpace: 'nowrap',
+                minWidth: 48,
+                textAlign: 'right',
+              }}
+            >
+              {percent(option.ceiling, 0)}%
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <Note>
+        右の数字は<strong>その段階を続けたときに認知度が落ち着く先</strong>。
+        いまの認知度はそこへ向かって毎月動く。
+        <strong>やめれば同じ速さで落ちる。</strong>
+        <br />
+        ★<strong>評判とは別物。</strong>
+        評判は「知っている人がどう思っているか」、認知度は「そもそも知られているか」。
+        評判が満点でも、知られていなければ誰も来ない。
+        {view.wordOfMouth > 0.01 && (
+          <>
+            <br />
+            いまは口コミで <span className="num">+{percent(view.wordOfMouth, 0)}%</span>{' '}
+            上乗せされている。患者が増えるほど広告が効きやすくなる。
+          </>
+        )}
+      </Note>
+    </>
   );
 }
 

@@ -111,6 +111,17 @@ await page.waitForTimeout(200);
 await page.getByRole('button', { name: '常勤医を増やす' }).click();
 await beat(900);
 await shot('02e-doctors');
+
+// --- 1c. ★集患。**看板だけでは商圏の4割にしか届かない。**
+// 評判が満点でも、知られていなければ誰も来ない
+await page.getByRole('button', { name: '患者', exact: true }).click();
+await beat(1000);
+await shot('02e2-marketing-none');
+await page.getByTestId('marketing-web').click();
+await beat(1000);
+await shot('02e3-marketing-web');
+await page.getByRole('button', { name: '概要', exact: true }).click();
+await beat(400);
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1400);
 await shot('02f-market');
@@ -195,7 +206,7 @@ await page.getByTestId('confirm-opening').click();
 await beat(1200);
 await shot('12-opened-B');
 
-// B院に医師を置く。★枠を先に買っていなければ＋は落ちている
+// B院に医師を置いて集患も打つ。★枠を先に買っていなければ＋は落ちている
 await page.getByTestId('clinic-row-B').click();
 await beat(900);
 const plus = page.getByRole('button', { name: '常勤医を増やす' });
@@ -204,6 +215,10 @@ if (!(await plus.isDisabled())) {
   await beat(600);
 }
 await shot('12b-clinic-B');
+await page.getByRole('button', { name: '患者', exact: true }).click();
+await beat(600);
+await page.getByTestId('marketing-web').click();
+await beat(600);
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1200);
 await shot('12c-clinic-B-market');
@@ -213,6 +228,13 @@ await beat(600);
 await advance(24);
 await beat(800);
 await shot('13-m37');
+
+// --- 5b2. ★競合を押すと素性が出る。勝てるのかがここで分かる
+await page.getByTestId('rival-pin-honmachi-naika').click();
+await beat(1400);
+await shot('12d-rival-detail');
+await page.getByLabel('閉じる').click();
+await beat(500);
 
 // --- 5c. 3年後。空いていたセグメントを取り切っている
 await page.getByTestId('clinic-row-B').click();
@@ -226,7 +248,8 @@ await beat(500);
 // --- 6. 役員報酬。個人資産の帯が伸び、内部留保の帯が縮む
 await visit('personalWealth', async () => {
   await shot('14-personal-before');
-  for (let i = 0; i < 6; i++) {
+  // ★満額まで取ると法人が持たない。集患を足してから、法人の余力は薄い
+  for (let i = 0; i < 2; i++) {
     await page.getByRole('button', { name: '報酬 +50万' }).click();
     await page.waitForTimeout(120);
   }

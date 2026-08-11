@@ -94,6 +94,8 @@ export interface MapScreenProps {
   onDecision?: (patch: Partial<MonthDecision>) => void;
   /** 候補地を選んで開院画面へ。科はあちらで決める */
   onChooseSite?: (id: ClinicId) => void;
+  /** 競合のピンを押したとき。相手の素性と押し出せるかを見せる */
+  onOpenCompetitor?: (id: string) => void;
   canGoBack: boolean;
   canGoForward: boolean;
 }
@@ -191,7 +193,11 @@ export function MapScreen(props: MapScreenProps) {
           />
           {/* 競合を先に描く。自院のピンが上に重なるように */}
           {rivals.map((rival) => (
-            <CompetitorPin key={rival.id} rival={rival} />
+            <CompetitorPin
+              key={rival.id}
+              rival={rival}
+              onOpen={() => props.onOpenCompetitor?.(rival.id)}
+            />
           ))}
           {summaries.map((clinic) => (
             <MapPin
@@ -670,16 +676,18 @@ function DoctorAlert({
  * 地図の主役は自院で、競合は環境（docs/spec/04-market.md §5）。
  * 押せない。中に入る用事が無い相手なので、押せる形にしない。
  */
-function CompetitorPin({ rival }: { rival: CompetitorView }) {
+function CompetitorPin({ rival, onOpen }: { rival: CompetitorView; onOpen?: () => void }) {
   const pos =
     COMPETITOR_POSITIONS[rival.id] ??
     DISTRICT_POSITIONS[rival.districtId] ?? { left: '50%', top: '50%' };
   const pushing = rival.monthsToExit !== null;
 
   return (
-    <div
+    <button
+      type="button"
       aria-label={`${rival.name} シェア ${percent(rival.share, 0)}%`}
       data-testid={`rival-pin-${rival.id}`}
+      onClick={onOpen}
       style={{
         position: 'absolute',
         left: pos.left,
@@ -689,7 +697,12 @@ function CompetitorPin({ rival }: { rival: CompetitorView }) {
         flexDirection: 'column',
         alignItems: 'center',
         gap: 2,
-        pointerEvents: 'none',
+        // ★押せる。競合は「読める情報」であって背景ではない
+        padding: 0,
+        border: 'none',
+        background: 'none',
+        cursor: 'pointer',
+        WebkitTapHighlightColor: 'transparent',
       }}
     >
       <div
@@ -722,7 +735,7 @@ function CompetitorPin({ rival }: { rival: CompetitorView }) {
           opacity: 0.7,
         }}
       />
-    </div>
+    </button>
   );
 }
 

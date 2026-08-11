@@ -131,7 +131,8 @@ export function buildStatements(input: BuildStatementsInput): FinancialStatement
   const totalExpenses =
     is.medicalSupplies + is.doctorPayroll + is.nursePayroll + is.otherPayroll +
     is.rent + is.depreciation + is.schoolOperating + is.agencyFees +
-    is.igyokuRelationCost + is.externalRelationCost + is.systemCost + is.headquarters;
+    is.igyokuRelationCost + is.externalRelationCost + is.systemCost + is.marketing +
+    is.headquarters;
 
   const operatingIncome = totalRevenue - totalExpenses;
   const ordinaryIncome = operatingIncome - is.interestExpense;

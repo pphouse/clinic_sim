@@ -21,6 +21,7 @@ import {
   CLINIC_LOAN,
   DOCTOR_COST_PER_MONTH,
   HQ_COST_PER_MONTH,
+  HQ_FULL_CLINICS,
   IGYOKU_RELATION_COST_PER_MONTH,
   INITIAL_CASH,
   INITIAL_REPUTATION,
@@ -59,6 +60,7 @@ import {
 import { evaluateGoals } from './goals';
 import { tickMarket } from './market';
 import { openingPlan } from './opening';
+import { awarenessCeilingOf, marketingCostOf, nextAwareness } from './awareness';
 import { rollRandomEvents } from './randomEvents';
 import {
   advanceRelations,
@@ -80,7 +82,7 @@ import { createRng } from './rng';
 import { buildStatements, depreciateAll, serviceLoans } from './accounting';
 import { collectEvents } from './events';
 import { initialAddonStatuses, tickFee } from './fee';
-import { monthLabel, tickClinic } from './engine';
+import { churnRateOf, monthLabel, newPatientsOf, tickClinic } from './engine';
 import { BASELINE_SCENARIO, clinicsOf, decisionAt, type Scenario } from './scenario';
 import {
   SCHOOL_GRADUATES_PER_CLASS,
@@ -109,6 +111,7 @@ import type {
   IncomeStatement,
   Loan,
   Man,
+  MarketingLevelId,
   MonthResult,
   ScreenId,
   StaffTick,
@@ -125,6 +128,8 @@ export interface SimulationRun {
 
 type MutableState = GameState & {
   doctorPlan: Record<ClinicId, number>;
+  /** 院ごとの集患投資（docs/spec/07-awareness.md §3）。既定は「なし」 */
+  marketingPlan: Record<ClinicId, MarketingLevelId>;
   maintainIgyoku: boolean;
   igyokuDuty: boolean;
   /**
@@ -148,6 +153,8 @@ function newClinicState(config: ClinicConfig): ClinicState {
     id: config.id,
     waitMinutes: 0,
     patientStock: 0,
+    // 認知度を持たない院は 1 のまま動かない（＝恒等式）
+    awareness: config.initialAwareness ?? 1,
     reputation,
     reputationHistory: Array.from(
       { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
@@ -180,6 +187,7 @@ function initialState(scenario: Scenario): MutableState {
     paidInCapital: cash,
     retainedEarnings: 0,
     doctorPlan: Object.fromEntries(configs.map((c) => [c.id, 0])),
+    marketingPlan: {},
     maintainIgyoku: true,
     igyokuDuty: false,
     configs,
@@ -258,6 +266,11 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         if (count !== undefined) state.doctorPlan[id] = count;
       }
     }
+    if (decision?.marketingByClinic) {
+      for (const [id, level] of Object.entries(decision.marketingByClinic)) {
+        if (level !== undefined) state.marketingPlan[id] = level;
+      }
+    }
     if (decision?.maintainIgyoku !== undefined) state.maintainIgyoku = decision.maintainIgyoku;
     if (decision?.igyokuDuty !== undefined) state.igyokuDuty = decision.igyokuDuty;
 
@@ -288,6 +301,8 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
           // 0 から埋まっていく局面は検証モデルに無い。素の式だと時定数74ヶ月で
           // 10年経っても埋まらない（docs/spec/06-opening.md §6）
           newPatientRamp: OPENING_RAMP_STRENGTH,
+          // 承継は看板と地域の記憶を引き継ぐので高い（docs/spec/07-awareness.md §4）
+          initialAwareness: site.initialAwareness,
         };
         state.configs.push(config);
         state.clinics.push(newClinicState(config));
@@ -690,6 +705,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     state.competitors = marketOutcome.competitors;
 
     // ---------------------------------------------------------- 4. 診療所
+    const openClinicCount = state.configs.filter((c) => month >= c.openMonth).length;
     const clinicTicks: ClinicTick[] = [];
     let insuranceRevenue: Man = 0;
     let selfPayRevenue: Man = 0;
@@ -697,20 +713,54 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     let doctorPayroll: Man = 0;
     let nursePayroll: Man = 0;
     let rent: Man = 0;
+    let marketing: Man = 0;
 
     for (const config of state.configs) {
       const previous = state.clinics.find((c) => c.id === config.id);
       if (!previous) continue;
       const doctors = doctorsByClinic[config.id] ?? 0;
       const rentMultiplier = rentMultiplierFor(state.propertyOwnedSince[config.id] !== undefined);
+      const laggedReputation =
+        previous.reputationHistory[NEW_PATIENT_REPUTATION_LAG_MONTHS - 1] ?? INITIAL_REPUTATION;
+      const share = marketOutcome.shareByClinic[config.id] ?? 1;
+
+      /*
+       * ★集患と認知度（docs/spec/07-awareness.md）。
+       *
+       * 認知度を持たない院（＝シナリオが直接持っている院）は素通りして 1 のまま。
+       * 落ち着き先の分母に使う「この院が行き着く患者数」は**認知度を掛ける前**の値。
+       * 掛けたあとを使うと、認知度が低いほど口コミが立ちやすいという逆の話になる。
+       */
+      const hasAwareness = config.initialAwareness !== undefined;
+      const open = month >= config.openMonth;
+      const level: MarketingLevelId = open ? (state.marketingPlan[config.id] ?? 'none') : 'none';
+      const marketingCost = open && hasAwareness ? marketingCostOf(level) : 0;
+      marketing += marketingCost;
+
+      let awareness = 1;
+      let awarenessCeiling = 1;
+      if (hasAwareness) {
+        const settledStock =
+          (newPatientsOf(config.newPatientPotential, laggedReputation) *
+            newPatientMultiplier *
+            share) /
+          churnRateOf(0, specialtyOf(config.specialtyId).baseChurnRatePerQuarter);
+        const stock = month === config.openMonth ? config.initialPatientStock : previous.patientStock;
+        awarenessCeiling = awarenessCeilingOf(level, stock, settledStock);
+        // 開院月はまだ動かさない。看板を出した日の認知度が initialAwareness
+        awareness =
+          month === config.openMonth
+            ? previous.awareness
+            : nextAwareness(previous.awareness, awarenessCeiling);
+      }
+
       const tick = tickClinic({
         config,
         month,
         previousStock: previous.patientStock,
         previousReputation: previous.reputation,
         // 3ヶ月前の評判。履歴が足りない開始直後は初期評判で埋まっている
-        laggedReputation:
-          previous.reputationHistory[NEW_PATIENT_REPUTATION_LAG_MONTHS - 1] ?? INITIAL_REPUTATION,
+        laggedReputation,
         doctors,
         nurseSufficiency,
         allocatedNurses: allocated[config.id] ?? 0,
@@ -721,11 +771,16 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         selfPayMultiplier,
         rentMultiplier,
         demandMultiplier: epidemic ? 1 + EPIDEMIC_DEMAND_UPLIFT : 1,
-        marketShare: marketOutcome.shareByClinic[config.id] ?? 1,
+        marketShare: share,
+        awareness,
+        awarenessCeiling,
+        marketingLevel: level,
+        marketingCost,
       });
       clinicTicks.push(tick);
 
       previous.patientStock = tick.patientStock;
+      previous.awareness = awareness;
       previous.reputation = tick.reputation;
       previous.waitMinutes = tick.waitMinutes;
       previous.reputationHistory = [tick.reputation, ...previous.reputationHistory].slice(
@@ -815,7 +870,10 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       igyokuRelationCost: state.maintainIgyoku ? IGYOKU_RELATION_COST_PER_MONTH : 0,
       externalRelationCost: relations.totalCost,
       systemCost: vendor.recurringCost,
-      headquarters: HQ_COST_PER_MONTH,
+      marketing,
+      headquarters: scenario.scaledHeadquarters
+        ? (HQ_COST_PER_MONTH * Math.min(HQ_FULL_CLINICS, openClinicCount)) / HQ_FULL_CLINICS
+        : HQ_COST_PER_MONTH,
       interestExpense: serviced.interest,
       extraordinaryLoss,
     };

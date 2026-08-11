@@ -24,6 +24,7 @@ import type {
   FeeRevision,
   FitoutId,
   GoalSpec,
+  MarketingLevelId,
   Man,
   SpecialtyId,
   SpecialtySpec,
@@ -116,6 +117,15 @@ export const SCHOOL_RETENTION_RATE = 0.35;
 export const SUPPLIES_RATE = 0.18;
 export const CLINIC_FIXED_COST_PER_MONTH = 450 / MONTHS_PER_QUARTER;
 export const HQ_COST_PER_MONTH = 250 / MONTHS_PER_QUARTER;
+/**
+ * 本部費が「何院ぶんの本部か」。
+ *
+ * ★検証モデルの 250万/四半期 は**3院を回す本部**の金額。
+ * 1院しか無いのに3院ぶんの本部を維持しているのはおかしいので、
+ * 本編では院数で按分する（`Scenario.scaledHeadquarters`）。
+ * **既定シナリオは按分しない**ので、検証済みの数字は動かない。
+ */
+export const HQ_FULL_CLINICS = 3;
 export const CLINIC_CAPEX = 6000;
 export const INITIAL_CASH = 15000;
 export const CLINIC_LOAN = 8000;
@@ -586,13 +596,16 @@ export const AI_TOOLS: AiToolSpec[] = [
  * 10年のうち半分が遊ばれないまま終わっていた。
  * 4院まで広げた強い筋の到達点を 120ヶ月目で測り直し、
  * **一本に賭ければ 100ヶ月前後で届く**位置に置き直した。
+ *
+ * ★集患を足した（docs/spec/07-awareness.md）ときにもう一度測り直している。
+ * 資産家だけは 2.5億 が届かなくなったので 2.1億 へ下げた。
  */
 export const GOALS: GoalSpec[] = [
   {
     id: 'personalWealth',
     name: '資産家',
-    description: '院長個人の資産（現金＋見栄資産）を 2.5 億円まで積む',
-    target: 25000,
+    description: '院長個人の資産（現金＋見栄資産）を 2.1 億円まで積む',
+    target: 21000,
     unit: '万円',
   },
   {
@@ -634,6 +647,68 @@ export const ENDING_TITLES: { minScore: number; title: string }[] = [
   { minScore: 0, title: '志半ばの院長' },
 ];
 
+// --- 集患と認知度（docs/spec/07-awareness.md）
+//
+// ★**検証されていない。** 表計算に対応する列が無い。
+// 認知度を持つのは開業で建てた院だけなので、既定シナリオは係数 1 の恒等式。
+
+/** 看板を出しているだけで届く範囲 */
+export const AWARENESS_BASE = 0.4;
+/** 患者が患者を呼ぶぶん。★ここが正のフィードバックの源 */
+export const AWARENESS_WORD_OF_MOUTH = 0.2;
+/** 落ち着き先へ向かう速さ。上げるのも落ちるのも同じ */
+export const AWARENESS_GAIN_PER_MONTH = 0.2;
+/** 上限。**商圏を100%取ることはできない** */
+export const AWARENESS_MAX = 0.98;
+
+export interface MarketingLevelSpec {
+  id: MarketingLevelId;
+  name: string;
+  character: string;
+  costPerMonth: Man;
+  /** 認知度の落ち着き先への上乗せ */
+  reach: number;
+}
+
+/**
+ * 集患投資。院ごとに毎月決める。
+ *
+ * ★**逓減する。** 25万で 0.15 なのに、160万でも 0.38 にしかならない。
+ * 6.4倍払って 2.5倍。金で殴り切れないようにしてある。
+ */
+export const MARKETING_LEVELS: MarketingLevelSpec[] = [
+  { id: 'none', name: 'なし', character: '看板だけ', costPerMonth: 0, reach: 0 },
+  {
+    id: 'local',
+    name: 'チラシ・看板',
+    character: 'ポスティングと駅の看板。安いが届く範囲が狭い',
+    costPerMonth: 25,
+    reach: 0.15,
+  },
+  {
+    id: 'web',
+    name: 'Web広告',
+    character: '検索広告とポータル掲載。いちばん効率が良い',
+    costPerMonth: 70,
+    reach: 0.28,
+  },
+  {
+    id: 'heavy',
+    name: '大々的に',
+    character: '交通広告と地域紙まで。ここまで来ると伸びが鈍る',
+    costPerMonth: 160,
+    reach: 0.38,
+  },
+];
+
+export function marketingLevelOf(id: MarketingLevelId | undefined): MarketingLevelSpec {
+  return MARKETING_LEVELS.find((m) => m.id === id) ?? MARKETING_LEVELS[0]!;
+}
+
+/** 開院時の認知度。承継は看板と地域の記憶を引き継ぐので高い */
+export const INITIAL_AWARENESS_NEW = 0.15;
+export const INITIAL_AWARENESS_INHERITED = 0.6;
+
 // --- 分院の候補地
 //
 // 「どこに出すか」を選ばせるために、ポテンシャルと承継の有無を振ってある。
@@ -651,6 +726,8 @@ export interface ClinicSite {
   capex: Man;
   /** 開院時に引ける融資 */
   loan: Man;
+  /** 開院時の認知度（docs/spec/07-awareness.md §4）。承継は看板を引き継ぐので高い */
+  initialAwareness: number;
 }
 
 export const CLINIC_SITES: ClinicSite[] = [
@@ -663,6 +740,7 @@ export const CLINIC_SITES: ClinicSite[] = [
     initialPatientStock: 0,
     capex: 5500,
     loan: 7000,
+    initialAwareness: INITIAL_AWARENESS_NEW,
   },
   {
     id: 'B',
@@ -673,6 +751,7 @@ export const CLINIC_SITES: ClinicSite[] = [
     initialPatientStock: 0,
     capex: 6000,
     loan: 8000,
+    initialAwareness: INITIAL_AWARENESS_NEW,
   },
   {
     id: 'C',
@@ -683,6 +762,7 @@ export const CLINIC_SITES: ClinicSite[] = [
     initialPatientStock: 0,
     capex: 6000,
     loan: 8000,
+    initialAwareness: INITIAL_AWARENESS_NEW,
   },
   {
     id: 'D',
@@ -693,6 +773,7 @@ export const CLINIC_SITES: ClinicSite[] = [
     initialPatientStock: 1800,
     capex: 11000,
     loan: 12000,
+    initialAwareness: INITIAL_AWARENESS_INHERITED,
   },
   {
     id: 'E',
@@ -703,6 +784,7 @@ export const CLINIC_SITES: ClinicSite[] = [
     initialPatientStock: 0,
     capex: 7000,
     loan: 9000,
+    initialAwareness: INITIAL_AWARENESS_NEW,
   },
 ];
 

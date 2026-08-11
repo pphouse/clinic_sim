@@ -33,6 +33,9 @@ export type SpecialtyId = 'naika' | 'shonika' | 'seikei' | 'hifuka' | 'ganka' | 
 /** 内装グレード。開業時に決めて、あとから変えられない（docs/spec/06-opening.md §4） */
 export type FitoutId = 'basic' | 'standard' | 'premium';
 
+/** 集患投資の段階。院ごとに毎月決める（docs/spec/07-awareness.md §3） */
+export type MarketingLevelId = 'none' | 'local' | 'web' | 'heavy';
+
 /**
  * 科の性格。**内科の値は検証済みの定数そのもの**（倍率ではなく実数で持つ）。
  * 既定シナリオは全て内科なので、科を足しても検証済みの数字は動かない。
@@ -100,6 +103,12 @@ export interface ClinicConfig {
    * 未設定なら 0（＝恒等式）
    */
   newPatientRamp?: number;
+  /**
+   * 開院時の認知度 0〜1（docs/spec/07-awareness.md）。
+   * ★**未設定の院は認知度という概念を持たず、係数が常に 1**（＝恒等式）。
+   * 承継は看板と地域の記憶を引き継ぐので高い
+   */
+  initialAwareness?: number;
 }
 
 export interface ClinicState {
@@ -116,6 +125,11 @@ export interface ClinicState {
    */
   reputationHistory: number[];
   doctors: number;
+  /**
+   * 認知度 0〜1。その商圏の人がこの医院を知っているか。
+   * 認知度を持たない院（＝シナリオが直接持っている院）は 1 のまま動かない
+   */
+  awareness: number;
 }
 
 /** 1 ヶ月の診療所シミュレーション結果 */
@@ -150,6 +164,13 @@ export interface ClinicTick {
   selfPayRevenue: Man;
   operatingCost: Man;
   operatingIncome: Man;
+  /** 認知度 0〜1。認知度を持たない院は 1 */
+  awareness: number;
+  /** いま打っている集患投資が届く先。認知度はここへ向かって動く */
+  awarenessCeiling: number;
+  marketingLevel: MarketingLevelId;
+  /** その院の今月の広告宣伝費 */
+  marketingCost: Man;
 }
 
 // ---------------------------------------------------------------- 人材
@@ -292,6 +313,8 @@ export interface IncomeStatement {
   externalRelationCost: Man;
   /** 電子カルテ・AI の月額、機器のリース料と保守料 */
   systemCost: Man;
+  /** 広告宣伝費（集患投資）。販管費なので営業利益の上 */
+  marketing: Man;
   /** 本部費 */
   headquarters: Man;
   totalExpenses: Man;

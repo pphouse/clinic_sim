@@ -21,6 +21,9 @@ export function withOpeningA(decisions: MonthDecision[]): MonthDecision[] {
       openFitout: 'standard',
       // テスト側が書いた配置を優先する。書いていなければ3名
       doctorsByClinic: { A: 3, ...first?.doctorsByClinic },
+      // ★集患を打たないと認知度が 0.4 で頭打ちになり、どの筋も破綻する
+      // （docs/spec/07-awareness.md）。「まともに開業した院」を既定にする
+      marketingByClinic: { A: 'web', ...first?.marketingByClinic },
     },
     ...rest,
   ];

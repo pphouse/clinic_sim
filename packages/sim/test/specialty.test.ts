@@ -37,7 +37,13 @@ const quiet = (decisions: MonthDecision[]) =>
 function openWith(site: string, sp: SpecialtyId) {
   const run = quiet([
     { month: 1, doctorsByClinic: { A: 3 }, igyokuRelationDelta: 40 },
-    { month: 25, openClinic: site, openSpecialty: sp, doctorsByClinic: { [site]: 3 }, agencyHires: 5 },
+    {
+      month: 25, openClinic: site, openSpecialty: sp,
+      doctorsByClinic: { [site]: 3 }, agencyHires: 5,
+      // ★集患を打たないと認知度が 0.4 で頭打ちになり、科の差より先に
+      // 「知られていない」が効いてしまう（docs/spec/07-awareness.md）
+      marketingByClinic: { [site]: 'web' },
+    },
   ]);
   return { run, clinic: at(run, 90).clinics.find((c) => c.id === site)! };
 }
@@ -153,7 +159,7 @@ describe('科の性格', () => {
   /**
    * ★立地の差が「利益」に出るのは、枠が余っている科だけ。
    *
-   * 整形外科と精神科は常勤医3名では常に枠が足りない（利用率 > 1）。
+   * 精神科は常勤医3名では常に枠が足りない（利用率 > 1）。
    * 満員の院は、商圏がどれだけ大きくても捌ける数までしか稼げないので、
    * どこに出しても同じ利益になる。**これはバグではなく、詰まった院の性質。**
    * 立地の差は患者数（＝将来の伸びしろ）の側に出る。
@@ -163,7 +169,7 @@ describe('科の性格', () => {
     const jammed = SPECIALTIES.filter((sp) =>
       sites.every((site) => openWith(site, sp.id).clinic.utilization > 1),
     ).map((sp) => sp.id);
-    expect(jammed.sort()).toEqual(['seikei', 'seishin']);
+    expect(jammed.sort()).toEqual(['seishin']);
 
     for (const sp of SPECIALTIES.filter((s) => !jammed.includes(s.id))) {
       const results = sites.map((site) => openWith(site, sp.id).clinic.operatingIncome);
