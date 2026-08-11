@@ -27,9 +27,11 @@ import {
   type MonthDecision,
   type MonthResult,
 } from '../src/index';
+import { withOpeningA } from './helpers';
 
 const at = (run: { months: MonthResult[] }, month: number) => run.months[month - 1]!;
-const play = (decisions: MonthDecision[]) => runSimulation({ ...PLAY_SCENARIO, decisions });
+const play = (decisions: MonthDecision[]) =>
+  runSimulation({ ...PLAY_SCENARIO, decisions: withOpeningA(decisions) });
 const honmachi = (m: MonthResult) => m.market.districts.find((d) => d.id === 'honmachi')!;
 
 // ==================================================================

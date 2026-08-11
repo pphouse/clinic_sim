@@ -30,6 +30,9 @@ export type DistrictId = string;
 /** 診療科。docs/spec/05-specialty.md */
 export type SpecialtyId = 'naika' | 'shonika' | 'seikei' | 'hifuka' | 'ganka' | 'seishin';
 
+/** 内装グレード。開業時に決めて、あとから変えられない（docs/spec/06-opening.md §4） */
+export type FitoutId = 'basic' | 'standard' | 'premium';
+
 /**
  * 科の性格。**内科の値は検証済みの定数そのもの**（倍率ではなく実数で持つ）。
  * 既定シナリオは全て内科なので、科を足しても検証済みの数字は動かない。
@@ -74,6 +77,29 @@ export interface ClinicConfig {
   newPatientPotential: number;
   /** 承継開業なら引き継ぐ患者数。新規開業は 0 */
   initialPatientStock: number;
+
+  // ---------------- 開業で焼き付ける値（docs/spec/06-opening.md §3）
+  //
+  // ★**持っていない院は従来どおりの経路を通る。**
+  // BASELINE_SCENARIO の3院はどれも持たないので、検証済みの資金繰りは動かない。
+
+  /** 開業時に決めた内装グレード。開院後は変えられない */
+  fitoutId?: FitoutId;
+  /**
+   * その院の評判が落ち着く先。内装で決まる。
+   * 未設定なら BASELINE_REPUTATION（＝恒等式）
+   */
+  baselineReputation?: number;
+  /** 実際に払った設備投資。立地 × 科 × 内装 */
+  capex?: Man;
+  /** 実際に組んだ開業融資。足りない分だけ借りる */
+  openingLoan?: Man;
+  /**
+   * 立ち上がりの強さ（docs/spec/06-opening.md §6）。
+   * 患者が埋まっていない院ほど新規が増える。**落ち着き先は変わらない。**
+   * 未設定なら 0（＝恒等式）
+   */
+  newPatientRamp?: number;
 }
 
 export interface ClinicState {
@@ -535,6 +561,11 @@ export interface GameState {
   personalAssets: string[];
   /** 盤上の競合。既定シナリオでは空 */
   competitors: CompetitorState[];
+  /**
+   * 開業据置の明ける月（docs/spec/06-opening.md §7）。
+   * **最初の開業の1回だけ立つ。** 意思決定で開院しない既定シナリオでは null のまま。
+   */
+  openingGraceUntilMonth: Month | null;
 }
 
 /** 1 ヶ月の全出力。UI はこれだけを読む */

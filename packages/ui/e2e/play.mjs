@@ -81,15 +81,39 @@ await page.waitForSelector('[data-testid="month-label"]');
 await beat(1600);
 await shot('01-start');
 
-// --- 1. 何を目指しているかが見えている。未来は見えない。競合が地図に居る
+// --- 1. ★院を1つも持たずに始まる。1ヶ月目にやることは開業しかない
 await shot('02-goals');
 
-// --- 1b. 商圏。**新規患者は独占値にシェアを掛けた分しか来ない**
-await page.getByRole('button', { name: /A院（本院）/ }).first().click();
+// --- 1a. 開業。立地 → 科 → 内装 の順に決める。
+// 自己資金1,000万では設備投資に届かないので、足りないぶんを全部借りることになる
+await page.getByTestId('open-site-A').click();
+await beat(1200);
+await shot('02a-opening-specialty');
+await page.getByTestId('specialty-naika').click();
+await beat(1200);
+await shot('02b-opening-fitout');
+await page.getByTestId('fitout-premium').click();
+await beat(1000);
+await shot('02c-opening-plan');
+// こだわり内装は評判の落ち着き先が高い代わりに1億近く借りることになる。
+// 1院目は標準で建てて、余力を分院に回す
+await page.getByTestId('fitout-standard').click();
+await beat(800);
+await page.getByTestId('confirm-opening').click();
+await beat(1200);
+await shot('02d-opened');
+
+// --- 1b. 常勤医を置く。開院しただけでは誰も診られない
+await page.getByTestId('clinic-row-A').click();
 await beat(900);
+await page.getByRole('button', { name: '常勤医を増やす' }).click();
+await page.waitForTimeout(200);
+await page.getByRole('button', { name: '常勤医を増やす' }).click();
+await beat(900);
+await shot('02e-doctors');
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1400);
-await shot('02b-market');
+await shot('02f-market');
 await page.getByLabel('閉じる').click();
 await beat(500);
 
@@ -140,36 +164,49 @@ await visit('agency', async () => {
   await shot('08c-agency-hired');
 });
 
-// --- 5. 借入で谷を越えてから、承継で分院を開く
+// --- 5. 銀行。★開業直後は純資産が薄いので、そもそも貸してもらえないことがある。
+// 「借りられない」もこの画面が伝える情報なので、押せなければ押さずに撮る
 await visit('bank', async () => {
   await shot('09-bank');
-  await page.getByRole('button', { name: /を借りる/ }).click();
-  await beat(900);
-  await shot('10-bank-borrowed');
+  const borrow = page.getByRole('button', { name: /を借りる/ });
+  if (await borrow.count()) {
+    await borrow.first().click();
+    await beat(900);
+    await shot('10-bank-borrowed');
+  }
 });
 
 await beat(600);
 await shot('11-sites');
 
-// --- 5b. ★開院画面。立地は決まった。ここで決めるのは科。
-// 「競合なし」の縁が光っている科が、この商圏で空いているセグメント
-await page.getByTestId('open-site-D').click();
+// --- 5b. ★2院目。立地は決まった。ここで決めるのは科。
+// 「競合なし」の縁が光っている科が、この商圏で空いているセグメント。
+// **本町の内科（1院目と同じ組み合わせ）に出すと自分と食い合う。**
+// 駅前の皮膚科は誰も居ない
+await page.getByTestId('open-site-B').click();
 await beat(1400);
 await shot('11b-opening-specialty');
-// 眼科は設備2倍で現金が届かない（ボタンが落ちている）。本町は整形が強い
-await page.getByTestId('specialty-seikei').click();
+await page.getByTestId('specialty-hifuka').click();
+await beat(1000);
+await page.getByTestId('fitout-standard').click();
+await beat(600);
+await shot('11c-opening-plan-B');
+await page.getByTestId('confirm-opening').click();
 await beat(1200);
-await shot('12-opened-D');
+await shot('12-opened-B');
 
-// D院を開く。承継なので初日から患者がいる。
-// ★＋ボタンは落ちている。調達可能数を使い切っているので、
-// これ以上は医局の関係値を上げるか紹介会社で枠を買うしかない
-await page.getByRole('button', { name: /D院（承継）/ }).first().click();
+// B院に医師を置く。★枠を先に買っていなければ＋は落ちている
+await page.getByTestId('clinic-row-B').click();
 await beat(900);
-await shot('12b-clinic-D');
+const plus = page.getByRole('button', { name: '常勤医を増やす' });
+if (!(await plus.isDisabled())) {
+  await plus.click();
+  await beat(600);
+}
+await shot('12b-clinic-B');
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1200);
-await shot('12c-clinic-D-market');
+await shot('12c-clinic-B-market');
 await page.getByLabel('閉じる').click();
 await beat(600);
 
@@ -177,8 +214,8 @@ await advance(24);
 await beat(800);
 await shot('13-m37');
 
-// --- 5b. 本町を A院と D院で挟んだ結果。競合のシェアが削れている
-await page.getByRole('button', { name: /A院（本院）/ }).first().click();
+// --- 5c. 3年後。空いていたセグメントを取り切っている
+await page.getByTestId('clinic-row-B').click();
 await beat(800);
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1400);

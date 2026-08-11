@@ -51,10 +51,14 @@ import {
   CLINIC_SITES,
   EPIDEMIC_DEMAND_UPLIFT,
   districtDemand,
+  fitoutOf,
   specialtyOf,
+  OPENING_RAMP_STRENGTH,
+  OPENING_INSOLVENCY_GRACE_MONTHS,
 } from './constants';
 import { evaluateGoals } from './goals';
 import { tickMarket } from './market';
+import { openingPlan } from './opening';
 import { rollRandomEvents } from './randomEvents';
 import {
   advanceRelations,
@@ -133,22 +137,37 @@ type MutableState = GameState & {
   epidemicUntilMonth: Month | null;
 };
 
+/**
+ * 院の初期状態。
+ * ★評判の出発点は**その院の落ち着き先**。内装を持たない院は INITIAL_REPUTATION（恒等式）。
+ * こだわり内装なのに 75 から始まって上がっていくのは、内装を買った実感と合わない。
+ */
+function newClinicState(config: ClinicConfig): ClinicState {
+  const reputation = config.baselineReputation ?? INITIAL_REPUTATION;
+  return {
+    id: config.id,
+    waitMinutes: 0,
+    patientStock: 0,
+    reputation,
+    reputationHistory: Array.from(
+      { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
+      () => reputation,
+    ),
+    doctors: 0,
+  };
+}
+
 function initialState(scenario: Scenario): MutableState {
   const configs = clinicsOf(scenario).map((c) => ({ ...c }));
+  /**
+   * 開業時の自己資金。既定シナリオは検証済みの INITIAL_CASH のまま。
+   * 本編は 1,000万 で始まる（docs/spec/06-opening.md §5）
+   */
+  const cash = scenario.initialCash ?? INITIAL_CASH;
   return {
     month: 0,
     rngSeed: scenario.seed,
-    clinics: configs.map<ClinicState>((c) => ({
-      id: c.id,
-      waitMinutes: 0,
-      patientStock: 0,
-      reputation: INITIAL_REPUTATION,
-      reputationHistory: Array.from(
-        { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
-        () => INITIAL_REPUTATION,
-      ),
-      doctors: 0,
-    })),
+    clinics: configs.map<ClinicState>((c) => newClinicState(c)),
     igyokuRelation: scenario.initialIgyokuRelation,
     agencyHiresCumulative: 0,
     nurses: scenario.initialNurses,
@@ -156,9 +175,9 @@ function initialState(scenario: Scenario): MutableState {
     addons: initialAddonStatuses(),
     assets: [],
     loans: [],
-    cash: INITIAL_CASH,
+    cash,
     accountsReceivable: 0,
-    paidInCapital: INITIAL_CASH,
+    paidInCapital: cash,
     retainedEarnings: 0,
     doctorPlan: Object.fromEntries(configs.map((c) => [c.id, 0])),
     maintainIgyoku: true,
@@ -167,6 +186,7 @@ function initialState(scenario: Scenario): MutableState {
     goalAchievedAt: {},
     insolventMonths: 0,
     epidemicUntilMonth: null,
+    openingGraceUntilMonth: null,
 
     // 拡張系。ここが全部「空」であることが、検証済みの数字を守る条件
     externalRelations: initialRelations(),
@@ -247,7 +267,10 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       if (site) {
         // 科は開院時に決める。あとから変えられない（docs/spec/05-specialty.md §8）
         const specialtyId = decision.openSpecialty ?? 'naika';
-        state.configs.push({
+        // 内装も同じ。取り替えられない意思決定（docs/spec/06-opening.md §4）
+        const fitout = fitoutOf(decision.openFitout);
+        const plan = openingPlan(site, specialtyId, fitout.id, state.cash);
+        const config: ClinicConfig = {
           id: site.id,
           name: site.name,
           districtId: site.districtId,
@@ -256,18 +279,22 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
           // ★その商圏でその科がどれだけ見込めるか。同じ立地でも科で変わる
           newPatientPotential: districtDemand(site.districtId, specialtyId),
           initialPatientStock: site.initialPatientStock,
-        });
-        state.clinics.push({
-          id: site.id,
-          waitMinutes: 0,
-          patientStock: 0,
-          reputation: INITIAL_REPUTATION,
-          reputationHistory: Array.from(
-            { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
-            () => INITIAL_REPUTATION,
-          ),
-          doctors: 0,
-        });
+          fitoutId: fitout.id,
+          baselineReputation: fitout.baselineReputation,
+          // ★ここで焼き付ける。焼き付いていない院は従来の経路を通るので、
+          // 既定シナリオの資金繰りは 1 円も動かない（docs/spec/06-opening.md §3）
+          capex: plan.capex,
+          openingLoan: plan.loan,
+          // 0 から埋まっていく局面は検証モデルに無い。素の式だと時定数74ヶ月で
+          // 10年経っても埋まらない（docs/spec/06-opening.md §6）
+          newPatientRamp: OPENING_RAMP_STRENGTH,
+        };
+        state.configs.push(config);
+        state.clinics.push(newClinicState(config));
+        // 開業据置は最初の1回だけ。分院ごとに延びると3年おきに建てて不死になる
+        if (state.openingGraceUntilMonth === null) {
+          state.openingGraceUntilMonth = month + OPENING_INSOLVENCY_GRACE_MONTHS;
+        }
         state.doctorPlan[site.id] = state.doctorPlan[site.id] ?? 1;
       }
     }
@@ -276,12 +303,15 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     for (const config of state.configs) {
       if (config.openMonth !== month) continue;
       openedClinicsThisMonth++;
-      // 候補地ごとに投資額が違う。承継は患者が付いてくる代わりに高い。
-      // 科でも変わる（眼科は手術機器で2倍、精神科は設備が要らず半分）
-      const site = CLINIC_SITES.find((s) => s.id === config.id);
-      const capex =
-        (site?.capex ?? CLINIC_CAPEX) * specialtyOf(config.specialtyId).capexMultiplier;
-      const loan = site?.loan ?? CLINIC_LOAN;
+      /*
+       * 開業で決めた額は config に焼き付いている（docs/spec/06-opening.md §3）。
+       *
+       * ★焼き付いていないのは**シナリオが最初から持っている院**だけで、
+       * それは既定シナリオの A・B・C を指す。ここで CLINIC_SITES を引くと、
+       * 候補地の値段を変えた瞬間に検証済みの資金繰りが動く。引かない。
+       */
+      const capex = config.capex ?? CLINIC_CAPEX;
+      const loan = config.openingLoan ?? CLINIC_LOAN;
       capitalExpenditure += capex;
       state.assets.push(...clinicAssets(config.id, month, capex));
       newBorrowing += loan;
@@ -842,9 +872,11 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       month,
       totalPatientStock: clinicTicks.reduce((sum, c) => sum + c.patientStock, 0),
       balanceSheet: financials.balanceSheet,
+      ordinaryIncome: financials.incomeStatement.ordinaryIncome,
       personal,
       achievedAt: state.goalAchievedAt,
       insolventMonths: state.insolventMonths,
+      openingGraceUntilMonth: state.openingGraceUntilMonth,
       totalMonths: scenario.totalMonths,
     });
     state.insolventMonths = goalTick.end.insolventMonths;

@@ -26,11 +26,12 @@ import {
   type MonthResult,
   type SpecialtyId,
 } from '../src/index';
+import { withOpeningA } from './helpers';
 
 const at = (run: { months: MonthResult[] }, month: number) => run.months[month - 1]!;
 /** 突発事象を切って科だけを比べる */
 const quiet = (decisions: MonthDecision[]) =>
-  runSimulation({ ...PLAY_SCENARIO, features: {}, decisions });
+  runSimulation({ ...PLAY_SCENARIO, features: {}, decisions: withOpeningA(decisions) });
 
 /** 科 sp を site に出して、90ヶ月目の姿を見る */
 function openWith(site: string, sp: SpecialtyId) {
@@ -142,10 +143,32 @@ describe('科の性格', () => {
   it('★どの科にも合わない立地がある。どこでも正解の科を作らない', () => {
     for (const sp of SPECIALTIES) {
       const results = ['B', 'C', 'D', 'E'].map(
-        (site) => openWith(site, sp.id).clinic.operatingIncome,
+        (site) => openWith(site, sp.id).clinic.patientStock,
       );
       const spread = Math.max(...results) - Math.min(...results);
-      expect(spread, `${sp.name}が立地を選ばない`).toBeGreaterThan(50);
+      expect(spread, `${sp.name}が立地を選ばない`).toBeGreaterThan(500);
+    }
+  });
+
+  /**
+   * ★立地の差が「利益」に出るのは、枠が余っている科だけ。
+   *
+   * 整形外科と精神科は常勤医3名では常に枠が足りない（利用率 > 1）。
+   * 満員の院は、商圏がどれだけ大きくても捌ける数までしか稼げないので、
+   * どこに出しても同じ利益になる。**これはバグではなく、詰まった院の性質。**
+   * 立地の差は患者数（＝将来の伸びしろ）の側に出る。
+   */
+  it('枠が余っている科は立地が利益にも出る。詰まっている科はどこでも満員', () => {
+    const sites = ['B', 'C', 'D', 'E'];
+    const jammed = SPECIALTIES.filter((sp) =>
+      sites.every((site) => openWith(site, sp.id).clinic.utilization > 1),
+    ).map((sp) => sp.id);
+    expect(jammed.sort()).toEqual(['seikei', 'seishin']);
+
+    for (const sp of SPECIALTIES.filter((s) => !jammed.includes(s.id))) {
+      const results = sites.map((site) => openWith(site, sp.id).clinic.operatingIncome);
+      const spread = Math.max(...results) - Math.min(...results);
+      expect(spread, `${sp.name}が立地を選ばない`).toBeGreaterThan(100);
     }
   });
 
@@ -253,18 +276,26 @@ describe('商圏ごとの需要', () => {
 
 describe('競合は儲かっているところに来る', () => {
   it('★空いたセグメントを見つけて放置、はできない', () => {
-    // 本町の眼科は最初は無風。だが育つと競合が来る
-    const run = runSimulation({
-      ...PLAY_SCENARIO,
-      decisions: [
-        { month: 1, doctorsByClinic: { A: 3 }, igyokuRelationDelta: 40 },
-        { month: 25, openClinic: 'D', openSpecialty: 'ganka', doctorsByClinic: { D: 3 }, agencyHires: 5 },
-      ],
+    // 本町の眼科は最初は無風。だが育つと競合が来る。
+    // ★種を振る。参入は乱数なので、1本の種に張り付けると
+    // 別の変更で乱数の並びがずれた瞬間に落ちる（実際そうなった）。
+    // 見たいのは「10年放置しても誰も来ない、が起きない」ことの方。
+    const seeds = [20240401, 7, 99, 1234, 555];
+    const invaded = seeds.filter((seed) => {
+      const run = runSimulation({
+        ...PLAY_SCENARIO,
+        seed,
+        decisions: withOpeningA([
+          { month: 1, doctorsByClinic: { A: 3 }, igyokuRelationDelta: 40 },
+          { month: 25, openClinic: 'D', openSpecialty: 'ganka', doctorsByClinic: { D: 3 }, agencyHires: 5 },
+        ]),
+      });
+      const seg = (m: number) =>
+        at(run, m).market.districts.find((d) => d.id === 'honmachi' && d.specialtyId === 'ganka');
+      expect(seg(25)?.competitors ?? []).toHaveLength(0);
+      return (seg(120)?.competitors ?? []).length > 0;
     });
-    const seg = (m: number) =>
-      at(run, m).market.districts.find((d) => d.id === 'honmachi' && d.specialtyId === 'ganka');
-    expect(seg(25)?.competitors ?? []).toHaveLength(0);
-    expect((seg(120)?.competitors ?? []).length).toBeGreaterThan(0);
+    expect(invaded.length).toBeGreaterThan(0);
   });
 
   it('新しい競合も科を持つ', () => {

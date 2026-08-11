@@ -27,6 +27,7 @@ import {
   scenarioFromSave,
   type ClinicId,
   type ClinicSite,
+  type FitoutId,
   type Month,
   type SpecialtyId,
   type MonthDecision,
@@ -164,8 +165,12 @@ export function App() {
         site={openingSite}
         result={result}
         cash={result.financials.balanceSheet.cash}
-        onOpen={(specialty: SpecialtyId) => {
-          applyDecision({ openClinic: openingSite.id, openSpecialty: specialty });
+        onOpen={(specialty: SpecialtyId, fitout: FitoutId) => {
+          applyDecision({
+            openClinic: openingSite.id,
+            openSpecialty: specialty,
+            openFitout: fitout,
+          });
           setOpeningSite(null);
         }}
         onClose={() => setOpeningSite(null)}

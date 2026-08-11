@@ -22,6 +22,7 @@ import type {
   EmrTier,
   ExternalRelationId,
   FeeRevision,
+  FitoutId,
   GoalSpec,
   Man,
   SpecialtyId,
@@ -577,29 +578,38 @@ export const AI_TOOLS: AiToolSpec[] = [
 // 検証済みの数式は「拡大するほど儲かる」形をしていない（枠を先に買うと死ぬ）ので、
 // 「10院に増やす」ような目標を置くと、どの遊び方でも届かない飾りになる。
 // 実際の到達点を測ってから決めた数字であり、**理想でも願望でもない。**
+/*
+ * ★目標値は**測ってから置いている。** 願望ではない。
+ *
+ * 自己資金1,000万から始める形（docs/spec/06-opening.md）に作り直したとき、
+ * 前の目標値（1.5億／8,000人／5,000万）は 50〜63ヶ月目で達成できてしまい、
+ * 10年のうち半分が遊ばれないまま終わっていた。
+ * 4院まで広げた強い筋の到達点を 120ヶ月目で測り直し、
+ * **一本に賭ければ 100ヶ月前後で届く**位置に置き直した。
+ */
 export const GOALS: GoalSpec[] = [
   {
     id: 'personalWealth',
     name: '資産家',
-    description: '院長個人の資産（現金＋見栄資産）を 1.5 億円まで積む',
-    target: 15000,
+    description: '院長個人の資産（現金＋見栄資産）を 2.5 億円まで積む',
+    target: 25000,
     unit: '万円',
   },
   {
     id: 'scale',
     name: '規模',
-    description: '全社の通院患者を 8,000 人まで増やす',
-    target: 8000,
+    description: '全社の通院患者を 11,000 人まで増やす',
+    target: 11000,
     unit: '人',
   },
   {
     id: 'corporate',
     name: '内部留保',
     // ★純資産ではなく**内部留保**（＝利益の蓄積）で測る。
-    // 純資産だと開始時点の資本金 1.5 億がそのまま乗ってしまい、
+    // 純資産だと開始時点の資本金がそのまま乗ってしまい、
     // 「何もしない」が達成率 62% になる。測りたいのは10年で何を積んだか
-    description: '10年で内部留保（利益の蓄積）を 5,000 万円積む',
-    target: 5000,
+    description: '10年で内部留保（利益の蓄積）を 2 億円積む',
+    target: 20000,
     unit: '万円',
   },
 ];
@@ -645,6 +655,16 @@ export interface ClinicSite {
 
 export const CLINIC_SITES: ClinicSite[] = [
   {
+    id: 'A',
+    districtId: 'honmachi',
+    name: 'A院（本町）',
+    character: '古くからの商店街。競合は多いが人が歩いている。新規開業',
+    newPatientPotential: districtPotential('honmachi'),
+    initialPatientStock: 0,
+    capex: 5500,
+    loan: 7000,
+  },
+  {
     id: 'B',
     districtId: 'ekimae',
     name: 'B院（駅前）',
@@ -685,6 +705,80 @@ export const CLINIC_SITES: ClinicSite[] = [
     loan: 9000,
   },
 ];
+
+// --- 開業（docs/spec/06-opening.md）
+//
+// ★**検証されていない。** 一般的な診療所開業の相場から置いた数字。
+// 既定シナリオは院を最初から持っていて openClinic の意思決定を1つも持たないので、
+// ここに書いた式は1回も評価されない。golden は動かない。
+
+/** 開業時の自己資金。診療所の新規開業でよく見る 1,000〜2,000万 の下限 */
+export const OPENING_OWN_FUNDS = 1000;
+
+/**
+ * 開業時に手元へ残す運転資金（設備投資に対する比率）。
+ * ★レセプトの入金は2ヶ月遅れる。ここが無いと開院した瞬間に現金が尽きる。
+ */
+export const OPENING_WORKING_CAPITAL_RATE = 0.25;
+
+/** 開業融資の丸め単位。円単位で貸す銀行は無い */
+export const OPENING_LOAN_UNIT = 100;
+
+/**
+ * 開院直後の立ち上がりの強さ（docs/spec/06-opening.md §6）。
+ * 素の式の時定数は 74ヶ月。これで 74/(1+4) ≒ 15ヶ月になり、3年でほぼ埋まる。
+ * **落ち着き先は動かない。** 速さだけが変わる。
+ */
+export const OPENING_RAMP_STRENGTH = 4;
+
+/**
+ * 開業据置（docs/spec/06-opening.md §7）。
+ * **最初の開業から3年は債務超過で潰れない。**
+ * 新規開業は1〜3年赤字で回るのが普通で、開業融資もそれを前提に組まれている。
+ */
+export const OPENING_INSOLVENCY_GRACE_MONTHS = 36;
+
+export interface FitoutSpec {
+  id: FitoutId;
+  name: string;
+  character: string;
+  capexMultiplier: number;
+  /**
+   * ★その院の評判が落ち着く先。
+   *
+   * 「開院時の評判 +10」では意味が無い。評判は BASELINE_REPUTATION へ回帰するので、
+   * 数ヶ月で 75 に戻って何も残らない。内装が効くのは**回帰先そのもの**を動かしたときだけ。
+   */
+  baselineReputation: number;
+}
+
+export const FITOUTS: FitoutSpec[] = [
+  {
+    id: 'basic',
+    name: '居抜き',
+    character: '前の医院の内装をそのまま使う。安く早いが、古さは隠せない',
+    capexMultiplier: 0.62,
+    baselineReputation: 66,
+  },
+  {
+    id: 'standard',
+    name: '標準',
+    character: '普通のテナント内装。過不足なし',
+    capexMultiplier: 1,
+    baselineReputation: BASELINE_REPUTATION,
+  },
+  {
+    id: 'premium',
+    name: 'こだわり',
+    character: '設計士を入れて動線から作る。待合が広く、口コミが伸びる',
+    capexMultiplier: 1.55,
+    baselineReputation: 86,
+  },
+];
+
+export function fitoutOf(id: FitoutId | undefined): FitoutSpec {
+  return FITOUTS.find((f) => f.id === id) ?? FITOUTS[1]!;
+}
 
 // --- 医局への当直派遣
 //

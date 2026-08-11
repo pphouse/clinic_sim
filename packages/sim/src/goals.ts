@@ -19,6 +19,7 @@ import type {
   GoalId,
   GoalProgress,
   GoalTick,
+  Man,
   Month,
   PersonalTick,
 } from './types';
@@ -27,11 +28,19 @@ export interface GoalInput {
   month: Month;
   totalPatientStock: number;
   balanceSheet: BalanceSheet;
+  /** その月の経常利益。**黒字なら潰さない**（下の判定を見よ） */
+  ordinaryIncome: Man;
   personal: PersonalTick;
   /** 前月までの達成月。一度達成したら取り消さない */
   achievedAt: Partial<Record<GoalId, Month>>;
   /** 前月までに債務超過が続いている月数 */
   insolventMonths: number;
+  /**
+   * 開業据置の明ける月。この月までは債務超過を数え始めない
+   * （docs/spec/06-opening.md §7）。**開業融資を組んでいない法人には無い。**
+   * 既定シナリオは意思決定で開院しないので null のまま＝従来どおり。
+   */
+  openingGraceUntilMonth?: Month | null;
   totalMonths: number;
 }
 
@@ -74,8 +83,28 @@ export function evaluateGoals(input: GoalInput): GoalTick {
     };
   });
 
-  const insolventMonths =
-    input.balanceSheet.totalEquity < 0 ? input.insolventMonths + 1 : 0;
+  /*
+   * ★開業据置。
+   *
+   * 新規開業の診療所は1〜3年赤字で回る。これは経営の失敗ではなく開業の形そのもので、
+   * 開業融資も事業計画を前提に組まれている。**そこで銀行が資金を引き上げることはない。**
+   * 据置が明けるまでは債務超過を数え始めない（docs/spec/06-opening.md §7）。
+   *
+   * 据置は**最初の開業の1回だけ**。分院を出すたびに延びると、
+   * 3年おきに安い院を建てて不死になる。
+   */
+  const inOpeningGrace =
+    input.openingGraceUntilMonth != null && input.month <= input.openingGraceUntilMonth;
+  /*
+   * ★数えるのは「債務超過**かつ**経常赤字」の月だけ。
+   *
+   * 純資産がマイナスでも黒字で回っている法人は、**潰れているのではなく返している最中**。
+   * 開業融資を借りた直後の診療所はまさにこれで、
+   * 純資産が戻るまでに5年かかる一方、経常は3年目には黒字になる。
+   * 債務超過だけで殺すと、正しく立ち上げた人が正しさの途中で死ぬ。
+   */
+  const failing = input.balanceSheet.totalEquity < 0 && input.ordinaryIncome < 0;
+  const insolventMonths = !inOpeningGrace && failing ? input.insolventMonths + 1 : 0;
 
   const achieved = goals.filter((g) => g.achieved).map((g) => g.id);
   const bankrupt = insolventMonths >= BANKRUPTCY_GRACE_MONTHS;

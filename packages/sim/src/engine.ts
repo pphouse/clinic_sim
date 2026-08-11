@@ -83,9 +83,17 @@ export function excessWait(waitMinutes: number): number {
 /**
  * 評判の更新。基準値へ緩やかに回帰しつつ、待ち時間の超過で削られる。
  * 回帰が遅いので、一度落ちると戻すのに何年もかかる。
+ *
+ * ★回帰先を院ごとに変えられるようにしてある（内装グレード。docs/spec/06-opening.md §4）。
+ * 既定は BASELINE_REPUTATION なので**恒等式**。
+ * 「開院時の評判 +10」では意味が無い。数ヶ月で 75 に戻って何も残らないから。
  */
-export function nextReputation(previous: number, waitMinutes: number): number {
-  const recovered = previous + (BASELINE_REPUTATION - previous) * REPUTATION_RECOVERY_RATE;
+export function nextReputation(
+  previous: number,
+  waitMinutes: number,
+  baseline = BASELINE_REPUTATION,
+): number {
+  const recovered = previous + (baseline - previous) * REPUTATION_RECOVERY_RATE;
   const damaged = recovered - excessWait(waitMinutes) * REPUTATION_PENALTY_PER_MINUTE;
   return clamp(damaged, REPUTATION_MIN, REPUTATION_MAX);
 }
@@ -123,6 +131,38 @@ export function churnRateOf(
 /** 新規患者は「3ヶ月前の」評判に依存する。これが遅延の源泉 */
 export function newPatientsOf(potential: number, laggedReputation: number): number {
   return (potential * laggedReputation) / BASELINE_REPUTATION;
+}
+
+/**
+ * 開院直後の立ち上がり（docs/spec/06-opening.md §6）。
+ *
+ * ★**検証されていない。** 検証モデルは A院を 3,200人 持って始まるので、
+ * 「0 から埋まっていく」局面が一度も無かった。
+ *
+ * 素の式だと、患者ストックの時定数は 1/月次離脱率＝**74ヶ月**。
+ * 0 から始めると10年経っても落ち着き先に届かず、開業がゲームとして成立しない。
+ * 実際の診療所は 1〜3年で埋まる。他院に通っている患者が乗り換えてくるからで、
+ * その乗り換え圧は「まだ埋まっていない分」に比例する。
+ *
+ *   係数 = 1 + 強さ × (1 − 埋まり具合)
+ *   埋まり具合 = 現在の患者 / 落ち着き先（＝新規 ÷ 混んでいないときの離脱率）
+ *
+ * ★**落ち着き先は動かない。** 微分方程式を解くと、この形は
+ * `dS/dt = (1+強さ)(N − cS)` になり、**時定数だけが 1/(1+強さ) になる。**
+ * 立ち上がりが速くなるだけで、行き着く先は素の式と同じ。
+ *
+ * 強さを持たない院（＝既定シナリオの3院）は係数 1 の恒等式。
+ */
+export function openingRampFactor(
+  strength: number | undefined,
+  currentStock: number,
+  settledNewPatients: number,
+  baseChurnRatePerQuarter: number,
+): number {
+  if (!strength || settledNewPatients <= 0) return 1;
+  const settledStock = settledNewPatients / churnRateOf(0, baseChurnRatePerQuarter);
+  const filled = Math.min(1, Math.max(0, currentStock / settledStock));
+  return 1 + strength * (1 - filled);
 }
 
 export interface ClinicTickInput {
@@ -195,10 +235,18 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
 
   // ポテンシャルは「その商圏を独占したときの新規患者数」。競合が居ればシェアを取られる
   const marketShare = input.marketShare ?? 1;
-  const newPatients =
+  const settledNewPatients =
     newPatientsOf(config.newPatientPotential, input.laggedReputation) *
     (input.newPatientMultiplier ?? 1) *
     marketShare;
+  const newPatients =
+    settledNewPatients *
+    openingRampFactor(
+      config.newPatientRamp,
+      openingStock,
+      settledNewPatients,
+      specialty.baseChurnRatePerQuarter,
+    );
   const demandVisits =
     (openingStock * specialty.visitsPerPatientPerMonth + newPatients) *
     (input.demandMultiplier ?? 1);
@@ -212,7 +260,12 @@ export function tickClinic(input: ClinicTickInput): ClinicTick {
   const utilization = effectiveCapacity === 0 ? 0 : demandVisits / effectiveCapacity;
   const waitMinutes = effectiveCapacity === 0 ? 0 : waitMinutesOf(utilization);
 
-  const reputation = nextReputation(input.previousReputation, waitMinutes);
+  const reputation = nextReputation(
+    input.previousReputation,
+    waitMinutes,
+    // 内装で決まる。持たない院は BASELINE_REPUTATION（恒等式）
+    input.config.baselineReputation,
+  );
   const churnRate = churnRateOf(waitMinutes, specialty.baseChurnRatePerQuarter);
   const patientStock = openingStock * (1 - churnRate) + newPatients;
 

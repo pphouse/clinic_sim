@@ -204,6 +204,48 @@ export function MapScreen(props: MapScreenProps) {
 
         <div style={{ padding: 'var(--space-4)' }}>
           {/*
+            ★1院目を開くまで、この画面には他にやることが無い。
+            候補地の一覧は下にあるが、それが「今やること」だと分からない。
+            開業はこのゲームで最初に効く遅延なので、迷わせない（docs/spec/06-opening.md）
+          */}
+          {summaries.length === 0 && props.onChooseSite && (
+            <div
+              data-testid="open-first-clinic"
+              style={{
+                marginBottom: 'var(--space-3)',
+                padding: 'var(--space-3)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--hq-accent)',
+                background: 'rgba(90, 155, 184, 0.09)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 'var(--text-label)',
+                  fontWeight: 600,
+                  color: 'var(--hq-accent)',
+                  marginBottom: 4,
+                }}
+              >
+                まず1院目を開きます
+              </div>
+              <div
+                style={{
+                  fontSize: 'var(--text-caption)',
+                  color: 'var(--paper-dim)',
+                  lineHeight: 1.6,
+                }}
+              >
+                手元にあるのは自己資金 <span className="num">{compactMan(group.cash)}円</span> だけ。
+                設備投資は<strong>足りないぶんを全部借りる</strong>ことになります。
+                どこで・何科を・どんな内装で開くかで、背負う額が変わる。
+                <br />
+                開業しないまま月を送っても、本部費だけが出ていきます。
+              </div>
+            </div>
+          )}
+
+          {/*
             ★医師の枠。**建てたのに医師を置けない**のがこのゲームで一番詰まる場所で、
             以前は診療所画面に入って「＋」が押せないことで初めて分かった。
             枠が無いことと、次にどこへ行けばいいかをマップに出す。
@@ -238,7 +280,7 @@ export function MapScreen(props: MapScreenProps) {
                   letterSpacing: '0.08em',
                 }}
               >
-                開院できる候補地
+                {summaries.length === 0 ? '開業できる候補地' : '開院できる候補地'}
               </h2>
               {sites.map((site) => {
                 // 投資額は科で変わる（眼科は2倍、精神科は半分）。ここでは最小額を出す
