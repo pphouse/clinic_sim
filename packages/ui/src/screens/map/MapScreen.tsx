@@ -12,6 +12,7 @@ import {
   MONTHS_PER_YEAR,
   districtNameOf,
   clinicSummaries,
+  doctorProcurement,
   groupSummary,
   monthLabel,
   reputationStars,
@@ -105,6 +106,7 @@ export function MapScreen(props: MapScreenProps) {
   // 足りない額まで見せる。「いくら足りないか」が次の判断になる
   const sites = CLINIC_SITES.filter((site) => !summaries.some((c) => c.id === site.id));
   const rivals = result.market.districts.flatMap((d) => d.competitors);
+  const doctors = doctorProcurement(result);
 
   return (
     <div
@@ -201,6 +203,21 @@ export function MapScreen(props: MapScreenProps) {
         </div>
 
         <div style={{ padding: 'var(--space-4)' }}>
+          {/*
+            ★医師の枠。**建てたのに医師を置けない**のがこのゲームで一番詰まる場所で、
+            以前は診療所画面に入って「＋」が押せないことで初めて分かった。
+            枠が無いことと、次にどこへ行けばいいかをマップに出す。
+          */}
+          {props.onDecision && (doctors.emptyClinics.length > 0 || doctors.unfilled > 0) && (
+            <DoctorAlert
+              doctors={doctors}
+              emptyNames={doctors.emptyClinics.map(
+                (id) => summaries.find((c) => c.id === id)?.name ?? id,
+              )}
+              onOpenBuilding={props.onOpenBuilding}
+            />
+          )}
+
           {summaries.map((clinic) => (
             <ClinicRow
               key={clinic.id}
@@ -525,6 +542,88 @@ function SummaryCell({
 }
 
 /**
+ * 医師が足りていないときの警告。
+ *
+ * 出す条件を「枠が0」ではなく「**置けていない席がある**」にしているのは、
+ * 枠が余っているだけなら困っていないから。困っている人にだけ出す。
+ */
+function DoctorAlert({
+  doctors,
+  emptyNames,
+  onOpenBuilding,
+}: {
+  doctors: ReturnType<typeof doctorProcurement>;
+  emptyNames: string[];
+  onOpenBuilding: (id: ScreenId) => void;
+}) {
+  const noSlots = doctors.free <= 0;
+
+  return (
+    <div
+      data-testid="doctor-alert"
+      style={{
+        marginBottom: 'var(--space-3)',
+        padding: 'var(--space-3)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--warning)',
+        background: 'rgba(224, 166, 60, 0.08)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 'var(--text-label)',
+          fontWeight: 600,
+          color: 'var(--warning)',
+          marginBottom: 4,
+        }}
+      >
+        {emptyNames.length > 0
+          ? `${emptyNames.join('・')}に常勤医が居ません`
+          : `常勤医が ${doctors.unfilled}名 置けていません`}
+      </div>
+      <div
+        style={{
+          fontSize: 'var(--text-caption)',
+          color: 'var(--paper-dim)',
+          lineHeight: 1.6,
+        }}
+      >
+        {emptyNames.length > 0 && '医師の居ない院に患者は来ません。'}
+        常勤医は<strong>枠のぶんしか置けない</strong>（いま
+        <span className="num">
+          {doctors.total}/{doctors.procurable}
+        </span>
+        枠）。
+        {noSlots
+          ? '枠が空いていないので、紹介会社で買うか、医局の関係値を上げてください。'
+          : '診療所の画面を開いて＋で置いてください。'}
+      </div>
+      {noSlots && (
+        <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            data-testid="alert-goto-agency"
+            style={{ flex: 1 }}
+            onClick={() => onOpenBuilding('agency')}
+          >
+            紹介会社で枠を買う
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{ flex: 1 }}
+            onClick={() => onOpenBuilding('igyoku')}
+          >
+            医局へ
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * 競合のピン。**自院より弱く描く。** 塗りを持たせず、輪郭だけ。
  * 地図の主役は自院で、競合は環境（docs/spec/04-market.md §5）。
  * 押せない。中に入る用事が無い相手なので、押せる形にしない。
@@ -711,7 +810,20 @@ function ClinicRow({ clinic, onOpen }: { clinic: ClinicSummary; onOpen: () => vo
       }}
     >
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 'var(--text-body)' }}>{clinic.name}</div>
+        <div style={{ fontSize: 'var(--text-body)' }}>
+          {clinic.name}
+          {/* ★常勤医0は評判より先に目に入るべき。看板だけの院には患者が来ない */}
+          <span
+            className="num"
+            style={{
+              marginLeft: 6,
+              fontSize: 'var(--text-caption)',
+              color: clinic.doctors === 0 ? 'var(--critical)' : 'var(--paper-mute)',
+            }}
+          >
+            医師{clinic.doctors}名
+          </span>
+        </div>
         <div style={{ marginTop: 3 }}>
           <StarRating value={reputationStars(clinic.reputation)} size={12} />
         </div>

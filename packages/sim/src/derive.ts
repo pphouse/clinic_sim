@@ -276,6 +276,42 @@ export function clinicSummaries(result: MonthResult): ClinicSummary[] {
   }));
 }
 
+/**
+ * 医師の調達状況。
+ *
+ * ★この derive を足したのは、**枠が無いことが診療所画面に入るまで分からなかった**から。
+ * 分院を建てて「＋」が押せず、理由も次にどこへ行けばいいかも画面に出ていなかった。
+ * マップと診療所の両方が同じ数字を読む必要があるので、ここに置く（CLAUDE.md §2）。
+ */
+export interface DoctorProcurement {
+  /** いま置けている常勤医 */
+  total: number;
+  /** 医局の派遣枠＋紹介会社の累計採用 */
+  procurable: number;
+  /**
+   * 空いている枠。0 なら医局か紹介会社へ行くまで1人も増やせない。
+   * ★単位は「枠」であって「人」ではない。科によっては1人が複数枠を食う（doctorScarcity）
+   */
+  free: number;
+  /** 置きたかったのに枠が足りず空いたままの席 */
+  unfilled: number;
+  /** 開院済みなのに常勤医が1人も居ない院。看板だけなので患者が来ない */
+  emptyClinics: ClinicId[];
+}
+
+export function doctorProcurement(result: MonthResult): DoctorProcurement {
+  const staff = result.staff;
+  return {
+    total: staff.doctorsTotal,
+    procurable: staff.doctorsProcurable,
+    free: Math.max(0, staff.doctorsProcurable - staff.doctorsTotal),
+    unfilled: staff.doctorsUnfilled,
+    emptyClinics: result.clinics
+      .filter((c) => c.open && (staff.doctorsByClinic[c.id] ?? 0) === 0)
+      .map((c) => c.id),
+  };
+}
+
 /** 全社の当月サマリ。マップ上部に出す */
 export interface GroupSummary {
   patientStock: number;

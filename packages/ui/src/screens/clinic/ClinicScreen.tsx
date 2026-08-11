@@ -22,6 +22,7 @@ import {
   unservedVisits,
   type ClinicId,
   type MonthResult,
+  type ScreenId,
 } from '@med/sim';
 import { IconButton } from '../../components/IconButton';
 import { StarRating } from '../../components/StarRating';
@@ -48,6 +49,8 @@ export interface ClinicScreenProps {
   clinicName: string;
   /** 表示中の月の結果 */
   result: MonthResult;
+  /** 建物へ飛ぶ。医師の枠が足りないときに医局・紹介会社へ送るために要る */
+  onOpenBuilding?: (id: ScreenId) => void;
   /** 前月。月初の患者数と増減を出すために読む */
   previous: MonthResult | null;
   /** 推移を描くための全期間。表示中の月までを切って使う */
@@ -659,33 +662,78 @@ function ControlDock(
           {!props.onDoctorsChange
             ? '過ぎた月は読むだけ'
             : props.atProcurementLimit
-              ? '調達可能数に達している。医局か紹介会社へ'
+              ? `調達 ${props.result.staff.doctorsTotal}/${props.result.staff.doctorsProcurable}枠`
               : '動かすと以後の月がすべて計算し直される'}
         </span>
       </div>
-      <div className="stepper">
-          <IconButton
-            label="常勤医を減らす"
-            tone="primary"
-            icon={<MinusIcon size={22} />}
-            disabled={!props.opened || props.doctors <= 0 || !props.onDoctorsChange}
-            onClick={() => props.onDoctorsChange?.(props.doctors - 1)}
-          />
+      {props.atProcurementLimit && props.onDoctorsChange && props.opened && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+            marginBottom: 'var(--space-2)',
+            padding: 'var(--space-2) var(--space-3)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--warning)',
+            background: 'rgba(224, 166, 60, 0.08)',
+          }}
+        >
           <span
-            key={props.doctors}
-            className="stepper__value value-changed"
-            data-testid="doctor-count"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 'var(--text-caption)',
+              color: 'var(--paper-dim)',
+              lineHeight: 1.5,
+            }}
           >
-            {props.doctors}
-            <span className="stepper__unit">名</span>
+            <strong style={{ color: 'var(--warning)' }}>医師の枠がありません。</strong>
+            先に枠を確保してください
           </span>
-          <IconButton
-            label="常勤医を増やす"
-            tone="primary"
-            icon={<PlusIcon size={22} />}
-            disabled={!props.opened || !props.onDoctorsChange || props.atProcurementLimit}
-            onClick={() => props.onDoctorsChange?.(props.doctors + 1)}
-          />
+          <button
+            type="button"
+            className="btn btn--primary"
+            data-testid="goto-agency"
+            style={{ whiteSpace: 'nowrap' }}
+            onClick={() => props.onOpenBuilding?.('agency')}
+          >
+            紹介会社へ
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{ whiteSpace: 'nowrap' }}
+            onClick={() => props.onOpenBuilding?.('igyoku')}
+          >
+            医局へ
+          </button>
+        </div>
+      )}
+
+      <div className="stepper">
+        <IconButton
+          label="常勤医を減らす"
+          tone="primary"
+          icon={<MinusIcon size={22} />}
+          disabled={!props.opened || props.doctors <= 0 || !props.onDoctorsChange}
+          onClick={() => props.onDoctorsChange?.(props.doctors - 1)}
+        />
+        <span
+          key={props.doctors}
+          className="stepper__value value-changed"
+          data-testid="doctor-count"
+        >
+          {props.doctors}
+          <span className="stepper__unit">名</span>
+        </span>
+        <IconButton
+          label="常勤医を増やす"
+          tone="primary"
+          icon={<PlusIcon size={22} />}
+          disabled={!props.opened || !props.onDoctorsChange || props.atProcurementLimit}
+          onClick={() => props.onDoctorsChange?.(props.doctors + 1)}
+        />
       </div>
 
       <div

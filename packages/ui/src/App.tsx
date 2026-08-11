@@ -197,6 +197,10 @@ export function App() {
       tab={tab}
       onTabChange={setTab}
       onClose={() => setOpenClinic(null)}
+      onOpenBuilding={(id) => {
+        setOpenClinic(null);
+        setOpenBuilding(id);
+      }}
       onDoctorsChange={isPresent ? (next) => setDoctors(openClinic, next) : undefined}
       onMonthChange={(delta) => goToMonth(month + delta)}
       canGoBack={month > 1}

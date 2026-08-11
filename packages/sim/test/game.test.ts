@@ -19,6 +19,7 @@ import {
   PLAY_SCENARIO,
   SAVE_VERSION,
   createSave,
+  doctorProcurement,
   endingTitleOf,
   parseSave,
   runSimulation,
@@ -184,6 +185,32 @@ describe('医師の調達', () => {
     const baseline = runSimulation(BASELINE_SCENARIO);
     expect(baseline.months.every((m) => !m.staff.doctorShortfall)).toBe(true);
     expect(baseline.months.every((m) => m.staff.doctorsUnfilled === 0)).toBe(true);
+  });
+
+  /**
+   * ★プレイテストで「E院を建てたが常勤医の増やし方が分からない」と詰まった。
+   * 枠が無いことは staff に出ていたが、**それを画面が読めていなかった**。
+   * マップと診療所の両方が同じ数字を読めるよう derive に出す。
+   */
+  it('枠が空いていないことと、医師の居ない院が derive から読める', () => {
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 13, openClinic: 'B', doctorsByClinic: { B: 2 } },
+    ]);
+    const p = doctorProcurement(at(run, 14));
+    expect(p.free).toBe(0);
+    expect(p.unfilled).toBe(2);
+    expect(p.emptyClinics).toEqual(['B']);
+  });
+
+  it('枠を買えば空き枠が立ち、警告の条件が消える', () => {
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 13, openClinic: 'B', agencyHires: 2, doctorsByClinic: { B: 2 } },
+    ]);
+    const p = doctorProcurement(at(run, 14));
+    expect(p.unfilled).toBe(0);
+    expect(p.emptyClinics).toEqual([]);
   });
 });
 
