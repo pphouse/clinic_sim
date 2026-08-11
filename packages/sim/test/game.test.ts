@@ -309,7 +309,7 @@ describe('突発事象', () => {
   it('通知として画面に振り分けられる', () => {
     const events = randomEventsIn(play(decisions));
     for (const e of events) {
-      expect(['personnel', 'map', 'bureau']).toContain(e.screen);
+      expect(['personnel', 'map', 'bureau', 'clinic', 'medicalAssociation']).toContain(e.screen);
       expect(e.title.length).toBeGreaterThan(0);
       expect(e.body.length).toBeGreaterThan(0);
     }

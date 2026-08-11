@@ -618,6 +618,16 @@ export interface GameEvent {
   screen: ScreenId;
   title: string;
   body: string;
+  /**
+   * 選択を迫るイベントの鍵と選択肢（docs/spec/08-decisions.md §2）。
+   * **空なら知らせるだけ。** UI はここがあるときだけ選択肢を出す
+   */
+  choiceKey?: string;
+  choices?: EventChoice[];
+  /** いま効いている選択肢の id。**答えていなければ既定のもの** */
+  chosen?: string;
+  /** プレイヤーが自分で答えたか。false なら既定に倒れているだけ */
+  answered?: boolean;
 }
 
 // ---------------------------------------------------------------- 商圏と競合
@@ -756,16 +766,55 @@ export type RandomEventId =
   | 'nurseExodus'
   | 'competitorOpened'
   | 'bureauAudit'
-  | 'epidemic';
+  | 'epidemic'
+  | 'badReview'
+  | 'apartmentBuilt'
+  | 'associationOffer';
 
 /** 起きてしまった突発事象。効果は既に state へ適用済み */
+/**
+ * イベントの選択肢が動かせるもの。**語彙はここで閉じている**
+ * （docs/spec/08-decisions.md §2）。新しい因果を発明しない。
+ */
+export interface EventEffect {
+  /** 即時の現金支出。P/L の特別損失に落ちる */
+  cost?: Man;
+  /** 医師が抜けるのを止める */
+  keepDoctor?: boolean;
+  /** 看護師の離職を止める */
+  keepNurses?: boolean;
+  /** その院の評判への即時の増減 */
+  reputationDelta?: number;
+  /** その院の新規患者ポテンシャルへの恒久倍率 */
+  potentialMultiplier?: number;
+  /** 外部関係値の増減 */
+  relationDelta?: { id: ExternalRelationId; value: number };
+}
+
+export interface EventChoice {
+  id: string;
+  label: string;
+  /** 何が起きるかの一言。**選ぶ前に代償が見えること** */
+  detail: string;
+  effect: EventEffect;
+  /** 答えなかったときに適用される。1つのイベントに必ず1つある */
+  isDefault?: boolean;
+}
+
 export interface RandomEventOccurrence {
   id: RandomEventId;
+  /**
+   * 一意の鍵。`${id}-${clinicId ?? 'group'}-${month}`。
+   * ★**意思決定の記録がこの鍵で紐づく**ので、作り方を変えると古いセーブの答えが外れる
+   */
+  key: string;
   month: Month;
   clinicId?: ClinicId;
   title: string;
   body: string;
   severity: 'info' | 'warning' | 'critical';
+  /** 選択を迫るなら。**空なら知らせるだけ** */
+  choices?: EventChoice[];
 }
 
 export type ScreenId =

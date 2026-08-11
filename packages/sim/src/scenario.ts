@@ -93,6 +93,12 @@ export interface MonthDecision {
    * 既定シナリオは1つも書いていないので、追加しても検証済みの結果は動かない。
    */
   marketingByClinic?: Partial<Record<ClinicId, MarketingLevelId>>;
+  /**
+   * イベントへの答え（docs/spec/08-decisions.md §2）。イベントの鍵 → 選択肢の id。
+   * **答えなければ既定の選択肢が適用される**ので、放置しても盤面は進む。
+   * 既定シナリオは1つも持たない。
+   */
+  eventChoices?: Record<string, string>;
   /** 銀行から引く額（万円）。純資産の BANK_LEVERAGE_LIMIT 倍を超えると断られる */
   borrow?: Man;
   /**
@@ -111,6 +117,8 @@ export interface MonthDecision {
  */
 export interface ScenarioFeatures {
   randomEvents?: boolean;
+  /** 節目の通知（docs/spec/08-decisions.md §4）。**数字は何も動かさない** */
+  milestones?: boolean;
 }
 
 export interface Scenario {
@@ -226,6 +234,6 @@ export const PLAY_SCENARIO: Scenario = {
   // 院は無い。立地も科も内装も、全部プレイヤーが選ぶ
   clinics: [],
   competitors: INITIAL_COMPETITORS,
-  features: { randomEvents: true },
+  features: { randomEvents: true, milestones: true },
   decisions: [],
 };

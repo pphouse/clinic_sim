@@ -878,6 +878,29 @@ export const BANK_LOAN_UNIT = 5000;
 /** 純資産に対して何倍まで借りられるか。ここを超えると銀行が首を縦に振らない */
 export const BANK_LEVERAGE_LIMIT = 4;
 
+// --- イベントの選択肢（docs/spec/08-decisions.md §2）
+//
+// ★**この層は検証されていない。** 既定シナリオは突発事象がオフなので1度も走らない。
+// 金額は「代償として痛いが、払える」ところに置いた。実測してから調整する。
+
+/** 辞めたいと言っている常勤医を引き止める一時金 */
+export const RETAIN_DOCTOR_COST = 700;
+/** 看護師の待遇改善で離職を止める一時金 */
+export const RETAIN_NURSES_COST = 400;
+/** 悪い口コミへの対応（体制の見直し）。放置すると評判が落ちる */
+export const REVIEW_RESPONSE_COST = 150;
+export const REVIEW_REPUTATION_DAMAGE = 8;
+/** マンションが建ったときに待合と駐車場を広げる設備投資と、その見返り */
+export const EXPANSION_CAPEX = 1200;
+export const EXPANSION_POTENTIAL_GAIN = 1.15;
+/** 医師会の役員を引き受けたときの実費と休診ぶん */
+export const ASSOCIATION_OFFICER_COST = 300;
+export const ASSOCIATION_OFFICER_GAIN = 25;
+export const ASSOCIATION_DECLINE_PENALTY = 5;
+
+/** 節目の通知（docs/spec/08-decisions.md §4）。**数字は何も動かさない** */
+export const MILESTONE_PATIENT_STOCK = 1000;
+
 // --- 突発事象
 //
 // ★全て features.randomEvents がオンのときだけ引く。
@@ -887,6 +910,9 @@ export const BANK_LEVERAGE_LIMIT = 4;
 export const DOCTOR_RESIGN_CHANCE = 0.005;
 /** 看護師の突発離職が起きる確率と、そのときに抜ける人数 */
 export const NURSE_EXODUS_CHANCE = 0.012;
+export const BAD_REVIEW_CHANCE = 0.02;
+export const APARTMENT_CHANCE = 0.006;
+export const ASSOCIATION_OFFER_CHANCE = 0.005;
 export const NURSE_EXODUS_COUNT = 3;
 /**
  * 競合が開業する確率（自院1つあたり月）。

@@ -26,16 +26,37 @@ import {
   EPIDEMIC_MONTHS,
   NURSE_EXODUS_CHANCE,
   NURSE_EXODUS_COUNT,
+  BAD_REVIEW_CHANCE,
+  APARTMENT_CHANCE,
+  ASSOCIATION_OFFER_CHANCE,
+  RETAIN_DOCTOR_COST,
+  RETAIN_NURSES_COST,
+  REVIEW_RESPONSE_COST,
+  REVIEW_REPUTATION_DAMAGE,
+  EXPANSION_CAPEX,
+  EXPANSION_POTENTIAL_GAIN,
+  ASSOCIATION_OFFICER_COST,
+  ASSOCIATION_OFFICER_GAIN,
+  ASSOCIATION_DECLINE_PENALTY,
 } from './constants';
 import type {
   ClinicConfig,
   ClinicId,
+  EventChoice,
   Man,
   Month,
   RandomEventOccurrence,
   Rng,
   SpecialtyId,
 } from './types';
+
+/**
+ * イベントの一意の鍵。**意思決定の記録がこれで紐づく**
+ * （docs/spec/08-decisions.md §2）。作り方を変えると古いセーブの答えが外れる。
+ */
+export function eventKeyOf(id: string, month: Month, clinicId?: ClinicId): string {
+  return `${id}-${clinicId ?? 'group'}-${month}`;
+}
 
 export interface RandomEventInput {
   month: Month;
@@ -112,13 +133,29 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
       out.doctorsLost[clinic.id] = (out.doctorsLost[clinic.id] ?? 0) + 1;
       out.events.push({
         id: 'doctorResigned',
+        key: eventKeyOf('doctorResigned', month, clinic.id),
         month,
         clinicId: clinic.id,
         severity: 'critical',
-        title: `${clinic.name} 常勤医が退職`,
+        title: `${clinic.name} 常勤医が辞めたいと言っている`,
         body:
-          '来月から診察枠が落ちます。補充には医局か紹介会社が要りますが、' +
+          '抜ければ来月から診察枠が落ちます。補充には医局か紹介会社が要りますが、' +
           'どちらもすぐには埋まりません。',
+        choices: [
+          {
+            id: 'retain',
+            label: '引き止める',
+            detail: `一時金 ${RETAIN_DOCTOR_COST}万円。枠は落ちない`,
+            effect: { cost: RETAIN_DOCTOR_COST, keepDoctor: true },
+          },
+          {
+            id: 'release',
+            label: '送り出す',
+            detail: '枠が1人分落ちる。待ち時間が伸び、評判が削れる',
+            effect: {},
+            isDefault: true,
+          },
+        ],
       });
       break; // 同じ院から同じ月に2人は抜けない
     }
@@ -129,12 +166,28 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
     out.nursesLost = NURSE_EXODUS_COUNT;
     out.events.push({
       id: 'nurseExodus',
+      key: eventKeyOf('nurseExodus', month),
       month,
       severity: 'warning',
-      title: `看護師 ${NURSE_EXODUS_COUNT}名が同時退職`,
+      title: `看護師 ${NURSE_EXODUS_COUNT}名がまとめて辞めそう`,
       body:
-        '看護師充足率が落ちます。市場からの採用は月 0.4 名しか進まないので、' +
+        '抜ければ充足率が落ちます。市場からの採用は月 0.4 名しか進まないので、' +
         '穴が埋まるまで時間がかかります。',
+      choices: [
+        {
+          id: 'retain',
+          label: '待遇で引き止める',
+          detail: `一時金 ${RETAIN_NURSES_COST}万円。充足率は落ちない`,
+          effect: { cost: RETAIN_NURSES_COST, keepNurses: true },
+        },
+        {
+          id: 'accept',
+          label: '受け入れる',
+          detail: `${NURSE_EXODUS_COUNT}名が抜ける。実効枠が絞られる`,
+          effect: {},
+          isDefault: true,
+        },
+      ],
     });
   }
 
@@ -174,6 +227,7 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
     });
     out.events.push({
       id: 'competitorOpened',
+      key: eventKeyOf('competitorOpened', month, target.id),
       month,
       clinicId: target.id,
       severity: 'warning',
@@ -191,6 +245,7 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
       input.insuranceRevenue * input.addonTotal * AUDIT_CLAWBACK_MONTHS;
     out.events.push({
       id: 'bureauAudit',
+      key: eventKeyOf('bureauAudit', month),
       month,
       severity: 'critical',
       title: '厚生局の個別指導。返還請求',
@@ -205,6 +260,7 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
     out.epidemicUntilMonth = month + EPIDEMIC_MONTHS;
     out.events.push({
       id: 'epidemic',
+      key: eventKeyOf('epidemic', month),
       month,
       severity: 'info',
       title: '感染症が流行',
@@ -214,5 +270,128 @@ export function rollRandomEvents(input: RandomEventInput): RandomEventOutcome {
     });
   }
 
+  /*
+   * ⑥⑦⑧ 選択を迫るイベント（docs/spec/08-decisions.md §2）。
+   *
+   * ★**末尾に足す。** 引く順番を変えると同じ種でも違う結果になり、
+   * 既存のセーブデータの再現が壊れる。
+   */
+  const withPatients = input.openClinics.filter(
+    (c) => (input.patientStockByClinic[c.id] ?? 0) > 0,
+  );
+  const pickClinic = (): ClinicConfig | null => {
+    if (withPatients.length === 0) return null;
+    return withPatients[rng.int(0, withPatients.length)] ?? null;
+  };
+
+  // ⑥ 口コミサイトに悪い書き込み。**放置すると評判が落ちる**
+  if (withPatients.length > 0 && rng.chance(BAD_REVIEW_CHANCE)) {
+    const target = pickClinic()!;
+    out.events.push({
+      id: 'badReview',
+      key: eventKeyOf('badReview', month, target.id),
+      month,
+      clinicId: target.id,
+      severity: 'warning',
+      title: `${target.name} 口コミサイトに悪い書き込み`,
+      body: '待たされた、説明が短い。放っておくと評判に響きます。',
+      choices: [
+        {
+          id: 'respond',
+          label: '体制を見直す',
+          detail: `${REVIEW_RESPONSE_COST}万円。評判は落ちない`,
+          effect: { cost: REVIEW_RESPONSE_COST },
+        },
+        {
+          id: 'ignore',
+          label: '放置する',
+          detail: `評判が ${REVIEW_REPUTATION_DAMAGE} 落ちる。戻すのに何年もかかる`,
+          effect: { reputationDelta: -REVIEW_REPUTATION_DAMAGE },
+          isDefault: true,
+        },
+      ],
+    });
+  }
+
+  // ⑦ 近隣にマンションが建つ。**商圏そのものが増える**数少ない機会
+  if (withPatients.length > 0 && rng.chance(APARTMENT_CHANCE)) {
+    const target = pickClinic()!;
+    out.events.push({
+      id: 'apartmentBuilt',
+      key: eventKeyOf('apartmentBuilt', month, target.id),
+      month,
+      clinicId: target.id,
+      severity: 'info',
+      title: `${target.name} の近くに大きなマンションが建つ`,
+      body: '世帯が増えます。受け止められる作りにしておくかどうか。',
+      choices: [
+        {
+          id: 'expand',
+          label: '待合と駐車場を広げる',
+          detail: `${EXPANSION_CAPEX}万円。この院の新規患者が恒久的に ${Math.round(
+            (EXPANSION_POTENTIAL_GAIN - 1) * 100,
+          )}% 増える`,
+          effect: {
+            cost: EXPANSION_CAPEX,
+            potentialMultiplier: EXPANSION_POTENTIAL_GAIN,
+          },
+        },
+        {
+          id: 'skip',
+          label: '見送る',
+          detail: '何も起きない。増えた世帯は他院へ流れる',
+          effect: {},
+          isDefault: true,
+        },
+      ],
+    });
+  }
+
+  // ⑧ 医師会から役員の打診。**金では買えない関係を、時間と実費で買う**
+  if (input.openClinics.length > 0 && rng.chance(ASSOCIATION_OFFER_CHANCE)) {
+    out.events.push({
+      id: 'associationOffer',
+      key: eventKeyOf('associationOffer', month),
+      month,
+      severity: 'info',
+      title: '医師会から役員の打診',
+      body: '会務に時間を取られますが、断り続けると地域での立場が悪くなります。',
+      choices: [
+        {
+          id: 'accept',
+          label: '引き受ける',
+          detail: `実費と休診で ${ASSOCIATION_OFFICER_COST}万円。医師会の関係値 +${ASSOCIATION_OFFICER_GAIN}`,
+          effect: {
+            cost: ASSOCIATION_OFFICER_COST,
+            relationDelta: { id: 'medicalAssociation', value: ASSOCIATION_OFFICER_GAIN },
+          },
+        },
+        {
+          id: 'decline',
+          label: '断る',
+          detail: `医師会の関係値 −${ASSOCIATION_DECLINE_PENALTY}`,
+          effect: {
+            relationDelta: { id: 'medicalAssociation', value: -ASSOCIATION_DECLINE_PENALTY },
+          },
+          isDefault: true,
+        },
+      ],
+    });
+  }
+
   return out;
+}
+
+/** 答えていなければ既定の選択肢。1つのイベントに必ず1つある */
+export function chosenChoiceOf(
+  event: RandomEventOccurrence,
+  answers: Record<string, string> | undefined,
+): EventChoice | null {
+  if (!event.choices || event.choices.length === 0) return null;
+  const answered = answers?.[event.key];
+  return (
+    event.choices.find((c) => c.id === answered) ??
+    event.choices.find((c) => c.isDefault) ??
+    event.choices[event.choices.length - 1]!
+  );
 }

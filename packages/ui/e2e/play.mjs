@@ -38,13 +38,20 @@ const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
 const currentMonth = async () =>
   Number(await page.getByTestId('month-label').getAttribute('data-month'));
 
-/** 月次ダイジェストが出ていたら閉じる。出ていなければ何もしない */
+/**
+ * 月次ダイジェストが出ていたら閉じる。
+ * ★選択を迫るイベントが出ていると背景タップでは閉じない。先に答える
+ */
 async function dismissDigest() {
   const digest = page.getByTestId('month-digest');
-  if (await digest.count()) {
-    await digest.click({ position: { x: 8, y: 8 } });
-    await page.waitForTimeout(60);
+  if (!(await digest.count())) return;
+  const choice = page.locator('[data-testid^="choice-"]').first();
+  if (await choice.count()) {
+    await choice.click();
+    await page.waitForTimeout(200);
   }
+  await digest.click({ position: { x: 8, y: 8 } });
+  await page.waitForTimeout(60);
 }
 
 /**
@@ -258,6 +265,17 @@ await visit('personalWealth', async () => {
 });
 await beat(800);
 await shot('16-goals-shifted');
+
+// --- 6b. ★「判断まで」で飛ばす。空の月を1つずつ押させない
+await dismissDigest();
+for (let i = 0; i < 3; i++) {
+  const skip = page.getByTestId('skip');
+  if ((await skip.count()) === 0) break;
+  await skip.click();
+  await beat(1200);
+  await shot(`16b-skip-${i}`);
+  await dismissDigest();
+}
 
 // --- 7. 残りを一気に進めて終局まで。終わったら「翌月へ」が消える
 const advanced = await advance(83);

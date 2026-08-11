@@ -88,6 +88,8 @@ export interface MapScreenProps {
   isPresent: boolean;
   /** 1ヶ月進める */
   onAdvance: () => void;
+  /** 次に手が要る月まで一気に進める（docs/spec/08-decisions.md §3） */
+  onSkip: () => void;
   /** 終局後だけ。結果画面へ戻る */
   onShowEnding?: () => void;
   /** 今月の意思決定。過去を見ているあいだは undefined */
@@ -452,15 +454,31 @@ export function MapScreen(props: MapScreenProps) {
         </div>
 
         {props.isPresent ? (
-          <button
-            type="button"
-            className="btn btn--primary"
-            data-testid="advance"
-            onClick={props.onAdvance}
-            style={{ whiteSpace: 'nowrap' }}
-          >
-            翌月へ
-          </button>
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            {/*
+              ★120ヶ月のうち手が要る月は10回もない。残りを1回ずつ押させると、
+              押すことそのものが作業になる（docs/spec/08-decisions.md §3）。
+              止まる条件は sim が持っている
+            */}
+            <button
+              type="button"
+              className="btn"
+              data-testid="skip"
+              onClick={props.onSkip}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              判断まで
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              data-testid="advance"
+              onClick={props.onAdvance}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              翌月へ
+            </button>
+          </div>
         ) : props.onShowEnding ? (
           <button
             type="button"

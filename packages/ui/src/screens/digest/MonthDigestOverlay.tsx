@@ -11,7 +11,7 @@
  * 何を出すかは sim の `monthDigest` が決めている。ここは並べて動かすだけ（CLAUDE.md §2）。
  */
 import { useEffect, useRef, useState } from 'react';
-import { monthLabel, type DigestLine, type MonthDigest } from '@med/sim';
+import { monthLabel, type DigestLine, type GameEvent, type MonthDigest } from '@med/sim';
 import { StarRating } from '../../components/StarRating';
 import { compactMan, minutes, people } from '../../format';
 
@@ -27,12 +27,25 @@ const reduceMotion = () =>
 
 export function MonthDigestOverlay({
   digest,
+  answerableMonth,
+  onChoose,
   onDismiss,
 }: {
   digest: MonthDigest;
+  /**
+   * この月のイベントだけ答えられる。
+   * ★まとめて進んだとき、途中の月のイベントには答えられない
+   * （進んだ分は確定。docs/spec/08-decisions.md §3）
+   */
+  answerableMonth?: number;
+  onChoose?: (key: string, choiceId: string) => void;
   onDismiss: () => void;
 }) {
   const still = reduceMotion();
+  /** 選択を迫るイベントが残っているあいだは、タップで閉じない */
+  const pending = digest.events.some(
+    (e) => e.choices && e.month === answerableMonth && !e.answered,
+  );
 
   useEffect(() => {
     if (digest.events.length > 0) return;
@@ -46,18 +59,24 @@ export function MonthDigestOverlay({
       role="button"
       tabIndex={0}
       aria-label="閉じる"
-      onClick={onDismiss}
+      onClick={() => {
+        if (!pending) onDismiss();
+      }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onDismiss();
+        if (!pending && (e.key === 'Enter' || e.key === ' ')) onDismiss();
       }}
       className={still ? undefined : 'digest-veil'}
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 50,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
+        /*
+          ★中央寄せは**内側の箱でやる。**
+          スクロールする flex コンテナに justify-content: center を掛けると、
+          中身が画面より高いときに上端がはみ出したまま辿り着けなくなる。
+          出来事が増えた瞬間にこれを踏んだ。
+        */
+        display: 'block',
         padding: 'var(--space-6) var(--space-4)',
         paddingTop: 'calc(var(--space-6) + var(--safe-top))',
         paddingBottom: 'calc(var(--space-6) + var(--safe-bottom))',
@@ -71,9 +90,20 @@ export function MonthDigestOverlay({
         overflowY: 'auto',
       }}
     >
+      <div
+        style={{
+          minHeight: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+        }}
+      >
       <div className={still ? undefined : 'digest-head'} style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-dim)' }}>
           {monthLabel(digest.month)}
+          {digest.spanMonths > 1 && (
+            <span style={{ marginLeft: 6 }}>（{digest.spanMonths}ヶ月ぶん）</span>
+          )}
         </div>
         <div
           style={{
@@ -97,36 +127,17 @@ export function MonthDigestOverlay({
       {digest.events.length > 0 && (
         <div style={{ marginTop: 'var(--space-6)' }}>
           {digest.events.map((event, i) => (
-            <div
+            <EventCard
               key={event.id}
-              className={still ? undefined : 'digest-line'}
-              style={{
-                animationDelay: `${(digest.lines.length + i) * LINE_STAGGER_MS}ms`,
-                padding: 'var(--space-3)',
-                marginBottom: 'var(--space-2)',
-                borderRadius: 'var(--radius-md)',
-                borderLeft: `3px solid var(--${
-                  event.severity === 'critical'
-                    ? 'critical'
-                    : event.severity === 'warning'
-                      ? 'warning'
-                      : 'hq-accent'
-                })`,
-                background: 'var(--ink-800)',
-              }}
-            >
-              <div style={{ fontSize: 'var(--text-label)', fontWeight: 600 }}>{event.title}</div>
-              <div
-                style={{
-                  fontSize: 'var(--text-caption)',
-                  color: 'var(--paper-dim)',
-                  lineHeight: 1.6,
-                  marginTop: 2,
-                }}
-              >
-                {event.body}
-              </div>
-            </div>
+              event={event}
+              delay={(digest.lines.length + i) * LINE_STAGGER_MS}
+              still={still}
+              onChoose={
+                event.month === answerableMonth && onChoose
+                  ? (choiceId) => onChoose(event.choiceKey!, choiceId)
+                  : undefined
+              }
+            />
           ))}
         </div>
       )}
@@ -139,8 +150,116 @@ export function MonthDigestOverlay({
           color: 'var(--paper-mute)',
         }}
       >
-        タップで閉じる
+        {pending ? '選んでください。答えないと既定の側に倒れます' : 'タップで閉じる'}
       </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 出来事のカード。**選択肢があるときは訊く。**
+ * docs/spec/08-decisions.md §2
+ */
+function EventCard({
+  event,
+  delay,
+  still,
+  onChoose,
+}: {
+  event: GameEvent;
+  delay: number;
+  still: boolean;
+  onChoose?: (choiceId: string) => void;
+}) {
+  const tone =
+    event.severity === 'critical' ? 'critical' : event.severity === 'warning' ? 'warning' : 'hq-accent';
+
+  return (
+    <div
+      className={still ? undefined : 'digest-line'}
+      style={{
+        animationDelay: `${delay}ms`,
+        padding: 'var(--space-3)',
+        marginBottom: 'var(--space-2)',
+        borderRadius: 'var(--radius-md)',
+        borderLeft: `3px solid var(--${tone})`,
+        background: 'var(--ink-800)',
+      }}
+    >
+      <div style={{ fontSize: 'var(--text-label)', fontWeight: 600 }}>{event.title}</div>
+      <div
+        style={{
+          fontSize: 'var(--text-caption)',
+          color: 'var(--paper-dim)',
+          lineHeight: 1.6,
+          marginTop: 2,
+        }}
+      >
+        {event.body}
+      </div>
+
+      {event.choices && event.choices.length > 0 && (
+        <div style={{ display: 'grid', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+          {event.choices.map((choice) => {
+            const decided = event.answered === true;
+            const picked = event.answered === true && event.chosen === choice.id;
+            return (
+              <button
+                key={choice.id}
+                type="button"
+                data-testid={`choice-${event.choiceKey}-${choice.id}`}
+                disabled={!onChoose}
+                onClick={(e) => {
+                  // 背景のタップで閉じる作りなので、ここで止めないと選んだ瞬間に消える
+                  e.stopPropagation();
+                  onChoose?.(choice.id);
+                }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: 'var(--space-3)',
+                  borderRadius: 'var(--radius-md)',
+                  // ★選んだ方を強く、選ばなかった方を薄く。
+                  // どちらも同じ濃さだと、決めたのかどうかが画面から読めない
+                  border: `1px solid ${picked ? 'var(--positive)' : 'var(--ink-600)'}`,
+                  background: picked ? 'rgba(78, 160, 116, 0.14)' : 'var(--ink-900)',
+                  color: 'var(--paper)',
+                  opacity: decided && !picked ? 0.4 : 1,
+                  cursor: onChoose ? 'pointer' : 'default',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 6,
+                    fontSize: 'var(--text-label)',
+                    fontWeight: 600,
+                    color: picked ? 'var(--positive)' : 'var(--paper)',
+                  }}
+                >
+                  {picked && <span aria-hidden>✓</span>}
+                  {choice.label}
+                </span>
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--text-caption)',
+                    color: 'var(--paper-mute)',
+                    lineHeight: 1.5,
+                    marginTop: 2,
+                  }}
+                >
+                  {choice.detail}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -56,12 +56,13 @@ import {
   specialtyOf,
   OPENING_RAMP_STRENGTH,
   OPENING_INSOLVENCY_GRACE_MONTHS,
+  MILESTONE_PATIENT_STOCK,
 } from './constants';
 import { evaluateGoals } from './goals';
 import { tickMarket } from './market';
 import { openingPlan } from './opening';
 import { awarenessCeilingOf, marketingCostOf, nextAwareness } from './awareness';
-import { rollRandomEvents } from './randomEvents';
+import { chosenChoiceOf, rollRandomEvents } from './randomEvents';
 import {
   advanceRelations,
   initialRelationActivity,
@@ -101,6 +102,7 @@ import type {
   ClinicState,
   ExternalRelationId,
   ClinicTick,
+  GameEvent,
   GoalId,
   GoalTick,
   Month,
@@ -556,10 +558,45 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       });
       randomEvents.push(...rolled.events);
 
+      /*
+       * ★選択肢の適用（docs/spec/08-decisions.md §2）。
+       *
+       * 答えていなければ既定の選択肢が効く。だから**放置しても盤面は進む**し、
+       * 答えを決定列に足して回し直すと、同じ乱数列で同じイベントが出て今度は答えが効く。
+       * セーブに状態を持たせずに済むのはこの形のおかげ。
+       */
+      const answers = decision?.eventChoices;
+      let keepDoctorAt: Record<ClinicId, boolean> = {};
+      let keepNurses = false;
+      for (const event of rolled.events) {
+        const choice = chosenChoiceOf(event, answers);
+        if (!choice) continue;
+        const e = choice.effect;
+        if (e.cost) extraordinaryLoss += e.cost;
+        if (e.keepDoctor && event.clinicId) keepDoctorAt[event.clinicId] = true;
+        if (e.keepNurses) keepNurses = true;
+        if (e.reputationDelta && event.clinicId) {
+          const clinic = state.clinics.find((c) => c.id === event.clinicId);
+          if (clinic) clinic.reputation = Math.max(0, clinic.reputation + e.reputationDelta);
+        }
+        if (e.potentialMultiplier && event.clinicId) {
+          const config = state.configs.find((c) => c.id === event.clinicId);
+          if (config) config.newPatientPotential *= e.potentialMultiplier;
+        }
+        if (e.relationDelta) {
+          const current = state.externalRelations[e.relationDelta.id] ?? 0;
+          state.externalRelations[e.relationDelta.id] = Math.max(
+            0,
+            current + e.relationDelta.value,
+          );
+        }
+      }
+
       for (const [id, lost] of Object.entries(rolled.doctorsLost)) {
+        if (keepDoctorAt[id]) continue;
         state.doctorPlan[id] = Math.max(0, (state.doctorPlan[id] ?? 0) - lost);
       }
-      state.nurses = Math.max(0, state.nurses - rolled.nursesLost);
+      if (!keepNurses) state.nurses = Math.max(0, state.nurses - rolled.nursesLost);
       // 競合は係数ではなく**盤上の相手**として増える。減り幅はシェアから出る
       for (const rival of rolled.newCompetitors) {
         state.competitors.push({ ...rival, openedAtMonth: month, weakMonths: 0, closedAtMonth: null });
@@ -925,6 +962,54 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       graduatedNurses: graduates,
     });
 
+    /*
+     * 節目の通知（docs/spec/08-decisions.md §4）。
+     * ★**数字は何も動かさない。** 最初の3年が赤字を見続けるだけになるので、
+     * 通った場所を名前で呼ぶためだけに置いている。
+     */
+    const milestoneEvents: GameEvent[] = [];
+    if (scenario.features?.milestones) {
+      const stock = clinicTicks.reduce((sum, c) => sum + c.patientStock, 0);
+      const previousStock =
+        months[months.length - 1]?.clinics.reduce((sum, c) => sum + c.patientStock, 0) ?? 0;
+      const ordinary = financials.incomeStatement.ordinaryIncome;
+      const everProfitable = months.some(
+        (m) => m.financials.incomeStatement.ordinaryIncome > 0,
+      );
+      if (ordinary > 0 && !everProfitable) {
+        milestoneEvents.push({
+          id: `milestone-firstProfit-${month}`,
+          month,
+          severity: 'info',
+          screen: 'hq',
+          title: '初めて黒字になりました',
+          body: '経常利益がプラスに乗りました。ここからは返す側に回れます。',
+        });
+      }
+      if (stock >= MILESTONE_PATIENT_STOCK && previousStock < MILESTONE_PATIENT_STOCK) {
+        milestoneEvents.push({
+          id: `milestone-stock-${month}`,
+          month,
+          severity: 'info',
+          screen: 'map',
+          title: `通院患者が ${MILESTONE_PATIENT_STOCK} 人を超えました`,
+          body: '患者が患者を呼び始めます。ここから認知度の伸びが速くなります。',
+        });
+      }
+      const openNow = clinicTicks.filter((c) => c.open).length;
+      const openBefore = months[months.length - 1]?.clinics.filter((c) => c.open).length ?? 0;
+      if (openNow === 2 && openBefore < 2) {
+        milestoneEvents.push({
+          id: `milestone-second-${month}`,
+          month,
+          severity: 'info',
+          screen: 'map',
+          title: '2院目が開きました',
+          body: '本部費が2院で割れます。ここからは1院のときと採算の形が変わります。',
+        });
+      }
+    }
+
     // ---------------------------------------------------------- 6. ゴールと終局
     const goalTick = evaluateGoals({
       month,
@@ -960,7 +1045,13 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
           screen: screenForRandomEvent(e.id),
           title: e.title,
           body: e.body,
+          // 選択を迫るイベントだけ。UI はここがあるときだけ選択肢を出す
+          choiceKey: e.choices ? e.key : undefined,
+          choices: e.choices,
+          chosen: chosenChoiceOf(e, decision?.eventChoices)?.id,
+          answered: e.choices ? decision?.eventChoices?.[e.key] !== undefined : undefined,
         })),
+        ...milestoneEvents,
       ],
       expansion,
       goals: goalTick,
@@ -985,6 +1076,12 @@ function screenForRandomEvent(id: RandomEventOccurrence['id']): ScreenId {
       return 'bureau';
     case 'epidemic':
       return 'map';
+    case 'badReview':
+      return 'clinic';
+    case 'apartmentBuilt':
+      return 'clinic';
+    case 'associationOffer':
+      return 'medicalAssociation';
   }
 }
 
