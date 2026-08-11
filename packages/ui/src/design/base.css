@@ -10,16 +10,37 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /*
+   * ★iOS Safari は 100% だとアドレスバーの出入りで高さが変わる。
+   * dvh（動的ビューポート）に対応していない古い版のために 100% も残す。
+   */
   height: 100%;
+  height: 100dvh;
   overflow: hidden;
   background: var(--ink-900);
   color: var(--paper);
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
+  /* 端まで引っ張ったときの跳ね返り。全画面差し替えの器では邪魔にしかならない */
+  overscroll-behavior: none;
+  /* 横向きにしたとき iOS が本文を勝手に拡大する。縦持ち固定なので止める */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
-button {
+/*
+ * ★iPhone 対策。
+ * - ダブルタップの拡大を止める（月送りを連打すると必ず踏む）
+ * - 長押しの選択メニューを出さない。読ませる文字はここから除外する
+ * - タップの青いハイライトを消す
+ */
+button,
+[role='button'] {
   font-family: inherit;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* 数値の増減が目で追えるように。減速する動きは使わない */

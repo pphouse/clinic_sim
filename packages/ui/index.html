@@ -5,6 +5,21 @@
     <!-- 縦持ち固定。横向きは実装しない（CLAUDE.md §5） -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>医療グループ経営シミュレーション</title>
+
+    <!--
+      ★iPhone のホーム画面に追加して、アプリとして開くための指定。
+      Safari のタブから開くと下にアドレスバーが居座って、
+      操作卓（親指の届く画面下半分。CLAUDE.md §5）が潰れる。
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- ステータスバーを面の色に沈める。black-translucent だと文字が背景と喧嘩する -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="医療グループ" />
+    <meta name="theme-color" content="#0e1419" />
+    <link rel="apple-touch-icon" href="./icon-180.png" />
+    <link rel="icon" href="./icon-192.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
   </head>
   <body>
     <div id="root"></div>

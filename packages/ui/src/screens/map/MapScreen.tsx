@@ -121,7 +121,8 @@ export function MapScreen(props: MapScreenProps) {
     >
       <header
         style={{
-          height: 'var(--header-height)',
+          height: `calc(var(--header-height) + var(--safe-top))`,
+          paddingTop: 'var(--safe-top)',
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
@@ -174,6 +175,14 @@ export function MapScreen(props: MapScreenProps) {
             style={{
               display: 'block',
               width: '100%',
+              /*
+                ★背の低い画面（Safari のタブから開くと 664px しかない）で
+                地図が縦を食い切り、診療所の行が1つも見えなくなる。
+                正方形のまま縮めず、上下を切って幅を保つ。
+              */
+              maxHeight: '38dvh',
+              objectFit: 'cover',
+              objectPosition: 'center',
               borderRadius: 'var(--radius-md)',
               border: '1px solid var(--ink-700)',
             }}

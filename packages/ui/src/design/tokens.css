@@ -88,6 +88,8 @@
   --tabbar-height: 64px;
   --header-height: 56px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* ノッチ。ホーム画面に追加してフルスクリーンで開くとステータスバーが被る */
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 /* 数値は必ず等幅数字で。桁がズレると財務諸表が読めない */

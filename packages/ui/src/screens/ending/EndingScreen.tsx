@@ -47,7 +47,14 @@ export function EndingScreen({
         fontFamily: 'var(--font-ui)',
       }}
     >
-      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-6) var(--space-4)' }}>
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: 'var(--space-6) var(--space-4)',
+          paddingTop: 'calc(var(--space-6) + var(--safe-top))',
+        }}
+      >
         <div style={{ textAlign: 'center', padding: 'var(--space-6) 0 var(--space-4)' }}>
           <div style={{ fontSize: 'var(--text-caption)', color: 'var(--paper-dim)' }}>
             {end.month !== null ? monthLabel(end.month) : ''}

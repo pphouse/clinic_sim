@@ -48,7 +48,8 @@ export function OpeningScreen({
     >
       <header
         style={{
-          height: 'var(--header-height)',
+          height: `calc(var(--header-height) + var(--safe-top))`,
+          paddingTop: 'var(--safe-top)',
           flexShrink: 0,
           display: 'grid',
           gridTemplateColumns: '1fr 44px',

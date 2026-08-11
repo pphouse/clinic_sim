@@ -90,7 +90,9 @@ export function ScreenShell({
     >
       <header
         style={{
-          height: 'var(--header-height)', flexShrink: 0,
+          height: `calc(var(--header-height) + var(--safe-top))`,
+          paddingTop: 'var(--safe-top)',
+          flexShrink: 0,
           display: 'grid', gridTemplateColumns: '44px 1fr 44px', alignItems: 'center',
           padding: '0 var(--space-3)', gap: 'var(--space-2)',
           borderBottom: '1px solid rgba(0,0,0,0.35)',
