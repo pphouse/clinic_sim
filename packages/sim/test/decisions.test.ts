@@ -7,16 +7,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   BASELINE_SCENARIO,
-  MAX_SKIP_MONTHS,
   PLAY_SCENARIO,
   REVIEW_REPUTATION_DAMAGE,
   RETAIN_DOCTOR_COST,
-  attentionOf,
   chosenChoiceOf,
   eventKeyOf,
-  nextStopMonth,
+  monthDigest,
   runSimulation,
-  spanDigest,
   type MonthDecision,
   type MonthResult,
 } from '../src/index';
@@ -57,13 +54,6 @@ describe('既定シナリオは判断の層を通らない', () => {
 
   it('意思決定に eventChoices を1つも持たない', () => {
     expect(BASELINE_SCENARIO.decisions.some((d) => d.eventChoices)).toBe(false);
-  });
-
-  it('★120ヶ月ずっと手が要らない＝止まる理由が無い', () => {
-    // 既定シナリオは債務超過に入るので insolvent と critical では止まる。
-    // 「選択」と「目標」では一度も止まらないことを見る
-    const reasons = baseline.months.map((m, i) => attentionOf(m, baseline.months[i - 1] ?? null));
-    expect(reasons).not.toContain('choice');
   });
 });
 
@@ -148,42 +138,28 @@ describe('答えると盤面が変わる', () => {
 });
 
 // ==================================================================
-// 判断まで進む
+// ★月は1つずつ進む
 // ==================================================================
 
-describe('判断まで進む', () => {
+describe('月をまとめて飛ばす道は無い', () => {
   const run = play([]);
 
-  it('選択肢のある月では必ず止まる', () => {
+  it('★選択を迫るイベントは、その月のダイジェストに必ず載る', () => {
+    // 飛ばす仕組みを外したので、拾い損ねる月が構造的に存在しない。
+    // ダイジェストは1ヶ月ぶんで、その月の出来事をそのまま持つ
     for (const [i, m] of run.months.entries()) {
-      if (m.events.some((e) => e.choices)) {
-        expect(attentionOf(m, run.months[i - 1] ?? null)).not.toBeNull();
-      }
+      if (!m.events.some((e) => e.choices)) continue;
+      const digest = monthDigest(m, run.months[i - 1] ?? null);
+      expect(digest.spanMonths).toBe(1);
+      expect(digest.events.filter((e) => e.choices)).toHaveLength(
+        m.events.filter((e) => e.choices).length,
+      );
     }
   });
 
-  it('何も起きなくても上限で止まる', () => {
-    const target = nextStopMonth(run.months, 1);
-    expect(target.month).toBeGreaterThan(1);
-    expect(target.month).toBeLessThanOrEqual(1 + MAX_SKIP_MONTHS);
-  });
-
-  it('★終局した月より先へは進まない', () => {
-    const ended = run.months.find((m) => m.goals.end.ended);
-    if (ended) {
-      const target = nextStopMonth(run.months, Math.max(1, ended.month - MAX_SKIP_MONTHS));
-      expect(target.month).toBeLessThanOrEqual(ended.month);
-    }
-  });
-
-  it('期間ダイジェストは飛ばした月の出来事を落とさない（種類としては全部残る）', () => {
-    const digest = spanDigest(run.months, 1, 13);
-    expect(digest.spanMonths).toBe(12);
-    const kinds = new Set(
-      run.months.slice(1, 13).flatMap((m) => m.events.map((e) => e.id.replace(/-\d+$/, ''))),
-    );
-    expect(digest.events).toHaveLength(kinds.size);
-    // 増減は始点と終点の差
+  it('ダイジェストの増減は前月との差', () => {
+    const digest = monthDigest(run.months[23]!, run.months[22]!);
+    expect(digest.spanMonths).toBe(1);
     const stock = digest.lines.find((l) => l.id === 'patientStock')!;
     expect(stock.delta).toBeCloseTo(stock.value - stock.from, 6);
   });
@@ -221,53 +197,5 @@ describe('節目の通知', () => {
       .filter((e) => e.id.startsWith('milestone-'))
       .map((e) => e.id.replace(/-\d+$/, ''));
     expect(new Set(ids).size).toBe(ids.length);
-  });
-});
-
-// ==================================================================
-// ★飛ばす仕組みが実際に飛ぶか
-// ==================================================================
-
-describe('飛ばす仕組みが役に立っているか', () => {
-  it('★続いている危機では止まらない。知らせるのは変わり目で1度', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 1 } }]);
-    // 危機の通知が2ヶ月以上続いている区間を探す
-    const streak = run.months.findIndex(
-      (m, i) =>
-        i > 0 &&
-        m.events.some((e) => e.severity === 'critical') &&
-        (run.months[i - 1]?.events.some((e) => e.severity === 'critical') ?? false),
-    );
-    expect(streak).toBeGreaterThan(0);
-    const result = run.months[streak]!;
-    // 続いているだけなら critical では止まらない
-    expect(attentionOf(result, run.months[streak - 1]!)).not.toBe('critical');
-  });
-
-  it('★押す回数が実際に減る。120ヶ月を「判断まで」で辿ると回数が桁で減る', () => {
-    const run = play([]);
-    let month = 1;
-    let presses = 0;
-    while (month < run.months.length && presses < 200) {
-      const target = nextStopMonth(run.months, month);
-      if (target.month <= month) break;
-      month = target.month;
-      presses++;
-      if (run.months[month - 1]!.goals.end.ended) break;
-    }
-    // 1ヶ月ずつなら120回。半分以下になっていなければ飛ばせていない
-    expect(presses).toBeLessThan(60);
-  });
-});
-
-describe('期間ダイジェストの畳み込み', () => {
-  it('★続いている通知を月数だけ並べない。種類ごとに1件', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 1 } }]);
-    const digest = spanDigest(run.months, 24, 36);
-    const kinds = digest.events.map((e) => e.id.replace(/-\d+$/, ''));
-    expect(new Set(kinds).size).toBe(kinds.length);
-    // 畳み込む前は同じ種類が何件も出ている
-    const raw = run.months.slice(24, 36).flatMap((m) => m.events);
-    expect(raw.length).toBeGreaterThan(digest.events.length);
   });
 });

@@ -23,8 +23,7 @@ import {
   PLAY_SCENARIO,
   competitorDetail,
   createSave,
-  nextStopMonth,
-  spanDigest,
+  monthDigest,
   runSimulation,
   scenarioFromSave,
   type ClinicId,
@@ -65,8 +64,6 @@ export function App() {
    * （docs/spec/screens/month-digest.md）
    */
   const [digestMonth, setDigestMonth] = useState<Month | null>(null);
-  /** ダイジェストの始点。まとめて進んだときは何ヶ月も前になる */
-  const [digestFrom, setDigestFrom] = useState<Month | null>(null);
   /** 開いている競合。マップのピンから入る */
   const [openCompetitor, setOpenCompetitor] = useState<string | null>(null);
 
@@ -89,28 +86,18 @@ export function App() {
     setViewMonth(Math.min(maxViewMonth, Math.max(1, next)));
   }
 
-  /** 1ヶ月進める。**押した瞬間に確定して、戻せない** */
+  /**
+   * 1ヶ月進める。**押した瞬間に確定して、戻せない**
+   *
+   * ★まとめて飛ばす道は用意しない（docs/spec/08-decisions.md §4）。
+   * このゲームの主題は遅延で、遅延は待つ月を数えて初めて痛みになる。
+   */
   function advance() {
     if (end.ended || save.currentMonth >= run.months.length) return;
     const next = save.currentMonth + 1;
-    setDigestFrom(save.currentMonth);
     setSave((s) => ({ ...s, currentMonth: next }));
     setViewMonth(next);
     setDigestMonth(next);
-  }
-
-  /**
-   * 次に手が要る月まで一気に進める（docs/spec/08-decisions.md §3）。
-   * **止まる条件は sim が持つ**（nextStopMonth）。UI に書くと画面ごとに判断がずれる。
-   */
-  function skipToDecision() {
-    if (end.ended || save.currentMonth >= run.months.length) return;
-    const target = nextStopMonth(run.months, save.currentMonth);
-    if (target.month <= save.currentMonth) return;
-    setDigestFrom(save.currentMonth);
-    setSave((s) => ({ ...s, currentMonth: target.month }));
-    setViewMonth(target.month);
-    setDigestMonth(target.month);
   }
 
   /**
@@ -152,7 +139,6 @@ export function App() {
     setOpenClinic(null);
     setOpenBuilding(null);
     setDigestMonth(null);
-    setDigestFrom(null);
     setOpenCompetitor(null);
   }
 
@@ -178,18 +164,13 @@ export function App() {
    * 差分は sim が全部持ってくる。ここで引き算しない（CLAUDE.md §2）
    */
   const digest =
-    digestMonth !== null &&
-    digestFrom !== null &&
-    digestMonth === save.currentMonth &&
-    !end.ended &&
-    digestMonth > 1
-      ? spanDigest(run.months, digestFrom, digestMonth)
+    digestMonth !== null && digestMonth === save.currentMonth && !end.ended && digestMonth > 1
+      ? monthDigest(run.months[digestMonth - 1]!, run.months[digestMonth - 2] ?? null)
       : null;
 
   const overlay = digest && (
     <MonthDigestOverlay
       digest={digest}
-      // ★答えられるのは「今」のイベントだけ。飛ばした月の分は確定している
       answerableMonth={save.currentMonth}
       onChoose={
         isPresent
@@ -259,7 +240,6 @@ export function App() {
           currentMonth={save.currentMonth}
           isPresent={isPresent}
           onAdvance={advance}
-          onSkip={skipToDecision}
           onShowEnding={end.ended ? () => setEndingDismissed(false) : undefined}
           onDecision={isPresent ? applyDecision : undefined}
           onChooseSite={

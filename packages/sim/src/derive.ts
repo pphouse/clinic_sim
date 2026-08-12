@@ -585,111 +585,14 @@ export function monthDigest(current: MonthResult, previous: MonthResult | null):
   };
 }
 
-// ---------------------------------------------------------------- 判断まで進む
-//
-// docs/spec/08-decisions.md §3
-
-/** なぜ止まったか */
-export type AttentionReason =
-  | 'choice'
-  | 'critical'
-  | 'goal'
-  | 'ended'
-  | 'cashShort'
-  | 'insolvent';
-
-/**
- * この月で手が要るか。**「判断まで進む」の停止条件はここにしかない。**
- * UI に条件を書くと、ボタンと画面で別の判断をし始める。
- */
-export function attentionOf(
-  result: MonthResult,
-  previous: MonthResult | null,
-): AttentionReason | null {
-  if (result.goals.end.ended) return 'ended';
-  if (result.events.some((e) => e.choices && e.choices.length > 0)) return 'choice';
-  if (result.goals.goals.some((g) => g.achievedAtMonth === result.month)) return 'goal';
-  /*
-   * ★危機は**変わり目でだけ**止める。
-   *
-   * 資金ショートや債務超過の通知は状況が続くかぎり毎月出る。
-   * 「出ていたら止まる」にすると、沈んでいるあいだは1ヶ月ずつしか進めなくなり、
-   * 飛ばす仕組みが役に立たない。**知らせるのは1度でいい。**
-   */
-  const criticalNow = result.events.some((e) => e.severity === 'critical');
-  const criticalBefore = previous?.events.some((e) => e.severity === 'critical') ?? false;
-  if (criticalNow && !criticalBefore) return 'critical';
-  const cash = result.financials.balanceSheet.cash;
-  if (cash < 0 && (previous?.financials.balanceSheet.cash ?? 0) >= 0) return 'cashShort';
-  if (
-    result.goals.end.insolventMonths === 1 &&
-    (previous?.goals.end.insolventMonths ?? 0) === 0
-  ) {
-    return 'insolvent';
-  }
-  return null;
-}
-
-/** 何も起きなくても、ここで必ず止まる */
-export const MAX_SKIP_MONTHS = 12;
-
-export interface SkipTarget {
-  month: Month;
-  reason: AttentionReason | null;
-}
-
-/**
- * `from` の次の月から進んで、最初に手が要る月。
+/*
+ * ★「判断まで進む」は作ったあとに外した（docs/spec/08-decisions.md §4）。
  *
- * ★これは未来を見せる関数ではない。**どこまで確定させるか**を決めるためのもの。
- * 呼び出し側は返ってきた月まで currentMonth を進め、その結果をまとめて見せる。
+ * 次に手が要る月まで一気に進める仕組みで、120回の月送りが7回になった。
+ * ただしこのゲームの主題は遅延で、遅延は**待つ月を数えて初めて痛みになる**。
+ * まとめて飛ばすと3ヶ月の遅れが1回の画面遷移に潰れ、手応えそのものが消えた。
+ * 月は1つずつ進める。ダイジェストは常に1ヶ月ぶん。
  */
-export function nextStopMonth(
-  months: MonthResult[],
-  from: Month,
-  maxSkip = MAX_SKIP_MONTHS,
-): SkipTarget {
-  const limit = Math.min(months.length, from + maxSkip);
-  for (let m = from + 1; m <= limit; m++) {
-    const result = months[m - 1];
-    if (!result) break;
-    const reason = attentionOf(result, months[m - 2] ?? null);
-    if (reason) return { month: m, reason };
-  }
-  return { month: limit, reason: null };
-}
-
-/**
- * 期間ぶんのダイジェスト。増減は始点と終点の差、出来事はその間の全部。
- * まとめて進んだときに、飛ばした月の出来事が消えないようにする。
- */
-export function spanDigest(
-  months: MonthResult[],
-  fromMonth: Month,
-  toMonth: Month,
-): MonthDigest {
-  const current = months[toMonth - 1]!;
-  const previous = months[fromMonth - 1] ?? null;
-  const digest = monthDigest(current, previous);
-  /*
-   * ★同じ通知を月数だけ並べない。
-   *
-   * 資金ショートも待ち時間の警告も、状況が続くかぎり毎月出る。
-   * 12ヶ月ぶんをそのまま並べると同じ札が12枚並んで読めなくなる。
-   * **種類ごとに最後の1件だけ残す**（いちばん新しい状態が知りたい情報だから）。
-   * 選択を迫るイベントは月ごとに一意なので、この畳み込みに巻き込まれない。
-   */
-  const byKind = new Map<string, GameEvent>();
-  for (const event of months.slice(fromMonth, toMonth).flatMap((m) => m.events)) {
-    byKind.set(eventKindOf(event), event);
-  }
-  return { ...digest, events: [...byKind.values()] };
-}
-
-/** 通知の種類。id の末尾の月を落としたもの */
-function eventKindOf(event: GameEvent): string {
-  return event.choiceKey ?? event.id.replace(/-\d+$/, '');
-}
 
 function digestHeadline(lines: DigestLine[]): string {
   let best: DigestLine | null = null;
