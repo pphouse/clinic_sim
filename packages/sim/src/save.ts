@@ -13,8 +13,14 @@
 import type { MonthDecision, Scenario } from './scenario';
 import type { Month } from './types';
 
-/** 形が変わったら上げる。古い版は読まずに捨てる */
-export const SAVE_VERSION = 1;
+/**
+ * 形が変わったら上げる。古い版は読まずに捨てる。
+ *
+ * 2: 本編が院を持たずに始まる形になった（docs/spec/06-opening.md）。
+ *    版1のセーブは「A院が最初からある」前提の決定列なので、
+ *    そのまま読むと**院を1つも持たないまま10年が始まる。**
+ */
+export const SAVE_VERSION = 2;
 
 export interface SaveData {
   version: number;

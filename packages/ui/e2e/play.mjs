@@ -39,16 +39,37 @@ const currentMonth = async () =>
   Number(await page.getByTestId('month-label').getAttribute('data-month'));
 
 /**
+ * 月次ダイジェストが出ていたら閉じる。
+ * ★選択を迫るイベントが出ていると背景タップでは閉じない。先に答える
+ */
+async function dismissDigest() {
+  const digest = page.getByTestId('month-digest');
+  if (!(await digest.count())) return;
+  const choice = page.locator('[data-testid^="choice-"]').first();
+  if (await choice.count()) {
+    await choice.click();
+    await page.waitForTimeout(200);
+  }
+  await digest.click({ position: { x: 8, y: 8 } });
+  await page.waitForTimeout(60);
+}
+
+/**
  * 月を進める。**戻れないので、進めた分だけ確定する。**
  * 終局すると「翌月へ」が消えるので、そこで止まる（消えたことが終わりの合図）。
+ *
+ * ★進めるたびにダイジェストが被さる。出来事があると自動では消えないので、
+ * 次の月へ行く前に必ず閉じる。
  */
 async function advance(count) {
   for (let i = 0; i < count; i++) {
+    await dismissDigest();
     const button = page.getByTestId('advance');
     if ((await button.count()) === 0) return i;
     await button.click();
     await page.waitForTimeout(40);
   }
+  await dismissDigest();
   return count;
 }
 
@@ -67,15 +88,50 @@ await page.waitForSelector('[data-testid="month-label"]');
 await beat(1600);
 await shot('01-start');
 
-// --- 1. 何を目指しているかが見えている。未来は見えない。競合が地図に居る
+// --- 1. ★院を1つも持たずに始まる。1ヶ月目にやることは開業しかない
 await shot('02-goals');
 
-// --- 1b. 商圏。**新規患者は独占値にシェアを掛けた分しか来ない**
-await page.getByRole('button', { name: /A院（本院）/ }).first().click();
+// --- 1a. 開業。立地 → 科 → 内装 の順に決める。
+// 自己資金1,000万では設備投資に届かないので、足りないぶんを全部借りることになる
+await page.getByTestId('open-site-A').click();
+await beat(1200);
+await shot('02a-opening-specialty');
+await page.getByTestId('specialty-naika').click();
+await beat(1200);
+await shot('02b-opening-fitout');
+await page.getByTestId('fitout-premium').click();
+await beat(1000);
+await shot('02c-opening-plan');
+// こだわり内装は評判の落ち着き先が高い代わりに1億近く借りることになる。
+// 1院目は標準で建てて、余力を分院に回す
+await page.getByTestId('fitout-standard').click();
+await beat(800);
+await page.getByTestId('confirm-opening').click();
+await beat(1200);
+await shot('02d-opened');
+
+// --- 1b. 常勤医を置く。開院しただけでは誰も診られない
+await page.getByTestId('clinic-row-A').click();
 await beat(900);
+await page.getByRole('button', { name: '常勤医を増やす' }).click();
+await page.waitForTimeout(200);
+await page.getByRole('button', { name: '常勤医を増やす' }).click();
+await beat(900);
+await shot('02e-doctors');
+
+// --- 1c. ★集患。**看板だけでは商圏の4割にしか届かない。**
+// 評判が満点でも、知られていなければ誰も来ない
+await page.getByRole('button', { name: '患者', exact: true }).click();
+await beat(1000);
+await shot('02e2-marketing-none');
+await page.getByTestId('marketing-web').click();
+await beat(1000);
+await shot('02e3-marketing-web');
+await page.getByRole('button', { name: '概要', exact: true }).click();
+await beat(400);
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1400);
-await shot('02b-market');
+await shot('02f-market');
 await page.getByLabel('閉じる').click();
 await beat(500);
 
@@ -94,7 +150,13 @@ await visit('referralHospital', async () => {
   await shot('05-referral');
 });
 
-await advance(6);
+// --- 3b. ★月を進めた手応え。何がどれだけ動いたかをダイジェストで出す
+await page.getByTestId('advance').click();
+await beat(1400);
+await shot('05b-digest');
+await dismissDigest();
+
+await advance(5);
 await beat(800);
 await shot('06-m07');
 
@@ -120,36 +182,53 @@ await visit('agency', async () => {
   await shot('08c-agency-hired');
 });
 
-// --- 5. 借入で谷を越えてから、承継で分院を開く
+// --- 5. 銀行。★開業直後は純資産が薄いので、そもそも貸してもらえないことがある。
+// 「借りられない」もこの画面が伝える情報なので、押せなければ押さずに撮る
 await visit('bank', async () => {
   await shot('09-bank');
-  await page.getByRole('button', { name: /を借りる/ }).click();
-  await beat(900);
-  await shot('10-bank-borrowed');
+  const borrow = page.getByRole('button', { name: /を借りる/ });
+  if (await borrow.count()) {
+    await borrow.first().click();
+    await beat(900);
+    await shot('10-bank-borrowed');
+  }
 });
 
 await beat(600);
 await shot('11-sites');
 
-// --- 5b. ★開院画面。立地は決まった。ここで決めるのは科。
-// 「競合なし」の縁が光っている科が、この商圏で空いているセグメント
-await page.getByTestId('open-site-D').click();
+// --- 5b. ★2院目。立地は決まった。ここで決めるのは科。
+// 「競合なし」の縁が光っている科が、この商圏で空いているセグメント。
+// **本町の内科（1院目と同じ組み合わせ）に出すと自分と食い合う。**
+// 駅前の皮膚科は誰も居ない
+await page.getByTestId('open-site-B').click();
 await beat(1400);
 await shot('11b-opening-specialty');
-// 眼科は設備2倍で現金が届かない（ボタンが落ちている）。本町は整形が強い
-await page.getByTestId('specialty-seikei').click();
+await page.getByTestId('specialty-hifuka').click();
+await beat(1000);
+await page.getByTestId('fitout-standard').click();
+await beat(600);
+await shot('11c-opening-plan-B');
+await page.getByTestId('confirm-opening').click();
 await beat(1200);
-await shot('12-opened-D');
+await shot('12-opened-B');
 
-// D院を開く。承継なので初日から患者がいる。
-// ★＋ボタンは落ちている。調達可能数を使い切っているので、
-// これ以上は医局の関係値を上げるか紹介会社で枠を買うしかない
-await page.getByRole('button', { name: /D院（承継）/ }).first().click();
+// B院に医師を置いて集患も打つ。★枠を先に買っていなければ＋は落ちている
+await page.getByTestId('clinic-row-B').click();
 await beat(900);
-await shot('12b-clinic-D');
+const plus = page.getByRole('button', { name: '常勤医を増やす' });
+if (!(await plus.isDisabled())) {
+  await plus.click();
+  await beat(600);
+}
+await shot('12b-clinic-B');
+await page.getByRole('button', { name: '患者', exact: true }).click();
+await beat(600);
+await page.getByTestId('marketing-web').click();
+await beat(600);
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1200);
-await shot('12c-clinic-D-market');
+await shot('12c-clinic-B-market');
 await page.getByLabel('閉じる').click();
 await beat(600);
 
@@ -157,8 +236,15 @@ await advance(24);
 await beat(800);
 await shot('13-m37');
 
-// --- 5b. 本町を A院と D院で挟んだ結果。競合のシェアが削れている
-await page.getByRole('button', { name: /A院（本院）/ }).first().click();
+// --- 5b2. ★競合を押すと素性が出る。勝てるのかがここで分かる
+await page.getByTestId('rival-pin-honmachi-naika').click();
+await beat(1400);
+await shot('12d-rival-detail');
+await page.getByLabel('閉じる').click();
+await beat(500);
+
+// --- 5c. 3年後。空いていたセグメントを取り切っている
+await page.getByTestId('clinic-row-B').click();
 await beat(800);
 await page.getByRole('button', { name: '商圏', exact: true }).click();
 await beat(1400);
@@ -169,7 +255,8 @@ await beat(500);
 // --- 6. 役員報酬。個人資産の帯が伸び、内部留保の帯が縮む
 await visit('personalWealth', async () => {
   await shot('14-personal-before');
-  for (let i = 0; i < 6; i++) {
+  // ★満額まで取ると法人が持たない。集患を足してから、法人の余力は薄い
+  for (let i = 0; i < 2; i++) {
     await page.getByRole('button', { name: '報酬 +50万' }).click();
     await page.waitForTimeout(120);
   }
@@ -178,6 +265,17 @@ await visit('personalWealth', async () => {
 });
 await beat(800);
 await shot('16-goals-shifted');
+
+// --- 6b. ★「判断まで」で飛ばす。空の月を1つずつ押させない
+await dismissDigest();
+for (let i = 0; i < 3; i++) {
+  const skip = page.getByTestId('skip');
+  if ((await skip.count()) === 0) break;
+  await skip.click();
+  await beat(1200);
+  await shot(`16b-skip-${i}`);
+  await dismissDigest();
+}
 
 // --- 7. 残りを一気に進めて終局まで。終わったら「翌月へ」が消える
 const advanced = await advance(83);

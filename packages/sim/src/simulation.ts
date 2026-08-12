@@ -21,6 +21,7 @@ import {
   CLINIC_LOAN,
   DOCTOR_COST_PER_MONTH,
   HQ_COST_PER_MONTH,
+  HQ_FULL_CLINICS,
   IGYOKU_RELATION_COST_PER_MONTH,
   INITIAL_CASH,
   INITIAL_REPUTATION,
@@ -51,11 +52,17 @@ import {
   CLINIC_SITES,
   EPIDEMIC_DEMAND_UPLIFT,
   districtDemand,
+  fitoutOf,
   specialtyOf,
+  OPENING_RAMP_STRENGTH,
+  OPENING_INSOLVENCY_GRACE_MONTHS,
+  MILESTONE_PATIENT_STOCK,
 } from './constants';
 import { evaluateGoals } from './goals';
 import { tickMarket } from './market';
-import { rollRandomEvents } from './randomEvents';
+import { openingPlan } from './opening';
+import { awarenessCeilingOf, marketingCostOf, nextAwareness } from './awareness';
+import { chosenChoiceOf, rollRandomEvents } from './randomEvents';
 import {
   advanceRelations,
   initialRelationActivity,
@@ -76,7 +83,7 @@ import { createRng } from './rng';
 import { buildStatements, depreciateAll, serviceLoans } from './accounting';
 import { collectEvents } from './events';
 import { initialAddonStatuses, tickFee } from './fee';
-import { monthLabel, tickClinic } from './engine';
+import { churnRateOf, monthLabel, newPatientsOf, tickClinic } from './engine';
 import { BASELINE_SCENARIO, clinicsOf, decisionAt, type Scenario } from './scenario';
 import {
   SCHOOL_GRADUATES_PER_CLASS,
@@ -95,6 +102,7 @@ import type {
   ClinicState,
   ExternalRelationId,
   ClinicTick,
+  GameEvent,
   GoalId,
   GoalTick,
   Month,
@@ -105,6 +113,7 @@ import type {
   IncomeStatement,
   Loan,
   Man,
+  MarketingLevelId,
   MonthResult,
   ScreenId,
   StaffTick,
@@ -121,6 +130,8 @@ export interface SimulationRun {
 
 type MutableState = GameState & {
   doctorPlan: Record<ClinicId, number>;
+  /** 院ごとの集患投資（docs/spec/07-awareness.md §3）。既定は「なし」 */
+  marketingPlan: Record<ClinicId, MarketingLevelId>;
   maintainIgyoku: boolean;
   igyokuDuty: boolean;
   /**
@@ -133,22 +144,39 @@ type MutableState = GameState & {
   epidemicUntilMonth: Month | null;
 };
 
+/**
+ * 院の初期状態。
+ * ★評判の出発点は**その院の落ち着き先**。内装を持たない院は INITIAL_REPUTATION（恒等式）。
+ * こだわり内装なのに 75 から始まって上がっていくのは、内装を買った実感と合わない。
+ */
+function newClinicState(config: ClinicConfig): ClinicState {
+  const reputation = config.baselineReputation ?? INITIAL_REPUTATION;
+  return {
+    id: config.id,
+    waitMinutes: 0,
+    patientStock: 0,
+    // 認知度を持たない院は 1 のまま動かない（＝恒等式）
+    awareness: config.initialAwareness ?? 1,
+    reputation,
+    reputationHistory: Array.from(
+      { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
+      () => reputation,
+    ),
+    doctors: 0,
+  };
+}
+
 function initialState(scenario: Scenario): MutableState {
   const configs = clinicsOf(scenario).map((c) => ({ ...c }));
+  /**
+   * 開業時の自己資金。既定シナリオは検証済みの INITIAL_CASH のまま。
+   * 本編は 1,000万 で始まる（docs/spec/06-opening.md §5）
+   */
+  const cash = scenario.initialCash ?? INITIAL_CASH;
   return {
     month: 0,
     rngSeed: scenario.seed,
-    clinics: configs.map<ClinicState>((c) => ({
-      id: c.id,
-      waitMinutes: 0,
-      patientStock: 0,
-      reputation: INITIAL_REPUTATION,
-      reputationHistory: Array.from(
-        { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
-        () => INITIAL_REPUTATION,
-      ),
-      doctors: 0,
-    })),
+    clinics: configs.map<ClinicState>((c) => newClinicState(c)),
     igyokuRelation: scenario.initialIgyokuRelation,
     agencyHiresCumulative: 0,
     nurses: scenario.initialNurses,
@@ -156,17 +184,19 @@ function initialState(scenario: Scenario): MutableState {
     addons: initialAddonStatuses(),
     assets: [],
     loans: [],
-    cash: INITIAL_CASH,
+    cash,
     accountsReceivable: 0,
-    paidInCapital: INITIAL_CASH,
+    paidInCapital: cash,
     retainedEarnings: 0,
     doctorPlan: Object.fromEntries(configs.map((c) => [c.id, 0])),
+    marketingPlan: {},
     maintainIgyoku: true,
     igyokuDuty: false,
     configs,
     goalAchievedAt: {},
     insolventMonths: 0,
     epidemicUntilMonth: null,
+    openingGraceUntilMonth: null,
 
     // 拡張系。ここが全部「空」であることが、検証済みの数字を守る条件
     externalRelations: initialRelations(),
@@ -238,6 +268,11 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         if (count !== undefined) state.doctorPlan[id] = count;
       }
     }
+    if (decision?.marketingByClinic) {
+      for (const [id, level] of Object.entries(decision.marketingByClinic)) {
+        if (level !== undefined) state.marketingPlan[id] = level;
+      }
+    }
     if (decision?.maintainIgyoku !== undefined) state.maintainIgyoku = decision.maintainIgyoku;
     if (decision?.igyokuDuty !== undefined) state.igyokuDuty = decision.igyokuDuty;
 
@@ -247,7 +282,10 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       if (site) {
         // 科は開院時に決める。あとから変えられない（docs/spec/05-specialty.md §8）
         const specialtyId = decision.openSpecialty ?? 'naika';
-        state.configs.push({
+        // 内装も同じ。取り替えられない意思決定（docs/spec/06-opening.md §4）
+        const fitout = fitoutOf(decision.openFitout);
+        const plan = openingPlan(site, specialtyId, fitout.id, state.cash);
+        const config: ClinicConfig = {
           id: site.id,
           name: site.name,
           districtId: site.districtId,
@@ -256,18 +294,24 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
           // ★その商圏でその科がどれだけ見込めるか。同じ立地でも科で変わる
           newPatientPotential: districtDemand(site.districtId, specialtyId),
           initialPatientStock: site.initialPatientStock,
-        });
-        state.clinics.push({
-          id: site.id,
-          waitMinutes: 0,
-          patientStock: 0,
-          reputation: INITIAL_REPUTATION,
-          reputationHistory: Array.from(
-            { length: NEW_PATIENT_REPUTATION_LAG_MONTHS },
-            () => INITIAL_REPUTATION,
-          ),
-          doctors: 0,
-        });
+          fitoutId: fitout.id,
+          baselineReputation: fitout.baselineReputation,
+          // ★ここで焼き付ける。焼き付いていない院は従来の経路を通るので、
+          // 既定シナリオの資金繰りは 1 円も動かない（docs/spec/06-opening.md §3）
+          capex: plan.capex,
+          openingLoan: plan.loan,
+          // 0 から埋まっていく局面は検証モデルに無い。素の式だと時定数74ヶ月で
+          // 10年経っても埋まらない（docs/spec/06-opening.md §6）
+          newPatientRamp: OPENING_RAMP_STRENGTH,
+          // 承継は看板と地域の記憶を引き継ぐので高い（docs/spec/07-awareness.md §4）
+          initialAwareness: site.initialAwareness,
+        };
+        state.configs.push(config);
+        state.clinics.push(newClinicState(config));
+        // 開業据置は最初の1回だけ。分院ごとに延びると3年おきに建てて不死になる
+        if (state.openingGraceUntilMonth === null) {
+          state.openingGraceUntilMonth = month + OPENING_INSOLVENCY_GRACE_MONTHS;
+        }
         state.doctorPlan[site.id] = state.doctorPlan[site.id] ?? 1;
       }
     }
@@ -276,12 +320,15 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     for (const config of state.configs) {
       if (config.openMonth !== month) continue;
       openedClinicsThisMonth++;
-      // 候補地ごとに投資額が違う。承継は患者が付いてくる代わりに高い。
-      // 科でも変わる（眼科は手術機器で2倍、精神科は設備が要らず半分）
-      const site = CLINIC_SITES.find((s) => s.id === config.id);
-      const capex =
-        (site?.capex ?? CLINIC_CAPEX) * specialtyOf(config.specialtyId).capexMultiplier;
-      const loan = site?.loan ?? CLINIC_LOAN;
+      /*
+       * 開業で決めた額は config に焼き付いている（docs/spec/06-opening.md §3）。
+       *
+       * ★焼き付いていないのは**シナリオが最初から持っている院**だけで、
+       * それは既定シナリオの A・B・C を指す。ここで CLINIC_SITES を引くと、
+       * 候補地の値段を変えた瞬間に検証済みの資金繰りが動く。引かない。
+       */
+      const capex = config.capex ?? CLINIC_CAPEX;
+      const loan = config.openingLoan ?? CLINIC_LOAN;
       capitalExpenditure += capex;
       state.assets.push(...clinicAssets(config.id, month, capex));
       newBorrowing += loan;
@@ -511,10 +558,45 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       });
       randomEvents.push(...rolled.events);
 
+      /*
+       * ★選択肢の適用（docs/spec/08-decisions.md §2）。
+       *
+       * 答えていなければ既定の選択肢が効く。だから**放置しても盤面は進む**し、
+       * 答えを決定列に足して回し直すと、同じ乱数列で同じイベントが出て今度は答えが効く。
+       * セーブに状態を持たせずに済むのはこの形のおかげ。
+       */
+      const answers = decision?.eventChoices;
+      let keepDoctorAt: Record<ClinicId, boolean> = {};
+      let keepNurses = false;
+      for (const event of rolled.events) {
+        const choice = chosenChoiceOf(event, answers);
+        if (!choice) continue;
+        const e = choice.effect;
+        if (e.cost) extraordinaryLoss += e.cost;
+        if (e.keepDoctor && event.clinicId) keepDoctorAt[event.clinicId] = true;
+        if (e.keepNurses) keepNurses = true;
+        if (e.reputationDelta && event.clinicId) {
+          const clinic = state.clinics.find((c) => c.id === event.clinicId);
+          if (clinic) clinic.reputation = Math.max(0, clinic.reputation + e.reputationDelta);
+        }
+        if (e.potentialMultiplier && event.clinicId) {
+          const config = state.configs.find((c) => c.id === event.clinicId);
+          if (config) config.newPatientPotential *= e.potentialMultiplier;
+        }
+        if (e.relationDelta) {
+          const current = state.externalRelations[e.relationDelta.id] ?? 0;
+          state.externalRelations[e.relationDelta.id] = Math.max(
+            0,
+            current + e.relationDelta.value,
+          );
+        }
+      }
+
       for (const [id, lost] of Object.entries(rolled.doctorsLost)) {
+        if (keepDoctorAt[id]) continue;
         state.doctorPlan[id] = Math.max(0, (state.doctorPlan[id] ?? 0) - lost);
       }
-      state.nurses = Math.max(0, state.nurses - rolled.nursesLost);
+      if (!keepNurses) state.nurses = Math.max(0, state.nurses - rolled.nursesLost);
       // 競合は係数ではなく**盤上の相手**として増える。減り幅はシェアから出る
       for (const rival of rolled.newCompetitors) {
         state.competitors.push({ ...rival, openedAtMonth: month, weakMonths: 0, closedAtMonth: null });
@@ -660,6 +742,7 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     state.competitors = marketOutcome.competitors;
 
     // ---------------------------------------------------------- 4. 診療所
+    const openClinicCount = state.configs.filter((c) => month >= c.openMonth).length;
     const clinicTicks: ClinicTick[] = [];
     let insuranceRevenue: Man = 0;
     let selfPayRevenue: Man = 0;
@@ -667,20 +750,54 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
     let doctorPayroll: Man = 0;
     let nursePayroll: Man = 0;
     let rent: Man = 0;
+    let marketing: Man = 0;
 
     for (const config of state.configs) {
       const previous = state.clinics.find((c) => c.id === config.id);
       if (!previous) continue;
       const doctors = doctorsByClinic[config.id] ?? 0;
       const rentMultiplier = rentMultiplierFor(state.propertyOwnedSince[config.id] !== undefined);
+      const laggedReputation =
+        previous.reputationHistory[NEW_PATIENT_REPUTATION_LAG_MONTHS - 1] ?? INITIAL_REPUTATION;
+      const share = marketOutcome.shareByClinic[config.id] ?? 1;
+
+      /*
+       * ★集患と認知度（docs/spec/07-awareness.md）。
+       *
+       * 認知度を持たない院（＝シナリオが直接持っている院）は素通りして 1 のまま。
+       * 落ち着き先の分母に使う「この院が行き着く患者数」は**認知度を掛ける前**の値。
+       * 掛けたあとを使うと、認知度が低いほど口コミが立ちやすいという逆の話になる。
+       */
+      const hasAwareness = config.initialAwareness !== undefined;
+      const open = month >= config.openMonth;
+      const level: MarketingLevelId = open ? (state.marketingPlan[config.id] ?? 'none') : 'none';
+      const marketingCost = open && hasAwareness ? marketingCostOf(level) : 0;
+      marketing += marketingCost;
+
+      let awareness = 1;
+      let awarenessCeiling = 1;
+      if (hasAwareness) {
+        const settledStock =
+          (newPatientsOf(config.newPatientPotential, laggedReputation) *
+            newPatientMultiplier *
+            share) /
+          churnRateOf(0, specialtyOf(config.specialtyId).baseChurnRatePerQuarter);
+        const stock = month === config.openMonth ? config.initialPatientStock : previous.patientStock;
+        awarenessCeiling = awarenessCeilingOf(level, stock, settledStock);
+        // 開院月はまだ動かさない。看板を出した日の認知度が initialAwareness
+        awareness =
+          month === config.openMonth
+            ? previous.awareness
+            : nextAwareness(previous.awareness, awarenessCeiling);
+      }
+
       const tick = tickClinic({
         config,
         month,
         previousStock: previous.patientStock,
         previousReputation: previous.reputation,
         // 3ヶ月前の評判。履歴が足りない開始直後は初期評判で埋まっている
-        laggedReputation:
-          previous.reputationHistory[NEW_PATIENT_REPUTATION_LAG_MONTHS - 1] ?? INITIAL_REPUTATION,
+        laggedReputation,
         doctors,
         nurseSufficiency,
         allocatedNurses: allocated[config.id] ?? 0,
@@ -691,11 +808,16 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
         selfPayMultiplier,
         rentMultiplier,
         demandMultiplier: epidemic ? 1 + EPIDEMIC_DEMAND_UPLIFT : 1,
-        marketShare: marketOutcome.shareByClinic[config.id] ?? 1,
+        marketShare: share,
+        awareness,
+        awarenessCeiling,
+        marketingLevel: level,
+        marketingCost,
       });
       clinicTicks.push(tick);
 
       previous.patientStock = tick.patientStock;
+      previous.awareness = awareness;
       previous.reputation = tick.reputation;
       previous.waitMinutes = tick.waitMinutes;
       previous.reputationHistory = [tick.reputation, ...previous.reputationHistory].slice(
@@ -785,7 +907,10 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       igyokuRelationCost: state.maintainIgyoku ? IGYOKU_RELATION_COST_PER_MONTH : 0,
       externalRelationCost: relations.totalCost,
       systemCost: vendor.recurringCost,
-      headquarters: HQ_COST_PER_MONTH,
+      marketing,
+      headquarters: scenario.scaledHeadquarters
+        ? (HQ_COST_PER_MONTH * Math.min(HQ_FULL_CLINICS, openClinicCount)) / HQ_FULL_CLINICS
+        : HQ_COST_PER_MONTH,
       interestExpense: serviced.interest,
       extraordinaryLoss,
     };
@@ -837,14 +962,64 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
       graduatedNurses: graduates,
     });
 
+    /*
+     * 節目の通知（docs/spec/08-decisions.md §4）。
+     * ★**数字は何も動かさない。** 最初の3年が赤字を見続けるだけになるので、
+     * 通った場所を名前で呼ぶためだけに置いている。
+     */
+    const milestoneEvents: GameEvent[] = [];
+    if (scenario.features?.milestones) {
+      const stock = clinicTicks.reduce((sum, c) => sum + c.patientStock, 0);
+      const previousStock =
+        months[months.length - 1]?.clinics.reduce((sum, c) => sum + c.patientStock, 0) ?? 0;
+      const ordinary = financials.incomeStatement.ordinaryIncome;
+      const everProfitable = months.some(
+        (m) => m.financials.incomeStatement.ordinaryIncome > 0,
+      );
+      if (ordinary > 0 && !everProfitable) {
+        milestoneEvents.push({
+          id: `milestone-firstProfit-${month}`,
+          month,
+          severity: 'info',
+          screen: 'hq',
+          title: '初めて黒字になりました',
+          body: '経常利益がプラスに乗りました。ここからは返す側に回れます。',
+        });
+      }
+      if (stock >= MILESTONE_PATIENT_STOCK && previousStock < MILESTONE_PATIENT_STOCK) {
+        milestoneEvents.push({
+          id: `milestone-stock-${month}`,
+          month,
+          severity: 'info',
+          screen: 'map',
+          title: `通院患者が ${MILESTONE_PATIENT_STOCK} 人を超えました`,
+          body: '患者が患者を呼び始めます。ここから認知度の伸びが速くなります。',
+        });
+      }
+      const openNow = clinicTicks.filter((c) => c.open).length;
+      const openBefore = months[months.length - 1]?.clinics.filter((c) => c.open).length ?? 0;
+      if (openNow === 2 && openBefore < 2) {
+        milestoneEvents.push({
+          id: `milestone-second-${month}`,
+          month,
+          severity: 'info',
+          screen: 'map',
+          title: '2院目が開きました',
+          body: '本部費が2院で割れます。ここからは1院のときと採算の形が変わります。',
+        });
+      }
+    }
+
     // ---------------------------------------------------------- 6. ゴールと終局
     const goalTick = evaluateGoals({
       month,
       totalPatientStock: clinicTicks.reduce((sum, c) => sum + c.patientStock, 0),
       balanceSheet: financials.balanceSheet,
+      ordinaryIncome: financials.incomeStatement.ordinaryIncome,
       personal,
       achievedAt: state.goalAchievedAt,
       insolventMonths: state.insolventMonths,
+      openingGraceUntilMonth: state.openingGraceUntilMonth,
       totalMonths: scenario.totalMonths,
     });
     state.insolventMonths = goalTick.end.insolventMonths;
@@ -870,7 +1045,13 @@ export function runSimulation(scenario: Scenario = BASELINE_SCENARIO): Simulatio
           screen: screenForRandomEvent(e.id),
           title: e.title,
           body: e.body,
+          // 選択を迫るイベントだけ。UI はここがあるときだけ選択肢を出す
+          choiceKey: e.choices ? e.key : undefined,
+          choices: e.choices,
+          chosen: chosenChoiceOf(e, decision?.eventChoices)?.id,
+          answered: e.choices ? decision?.eventChoices?.[e.key] !== undefined : undefined,
         })),
+        ...milestoneEvents,
       ],
       expansion,
       goals: goalTick,
@@ -895,6 +1076,12 @@ function screenForRandomEvent(id: RandomEventOccurrence['id']): ScreenId {
       return 'bureau';
     case 'epidemic':
       return 'map';
+    case 'badReview':
+      return 'clinic';
+    case 'apartmentBuilt':
+      return 'clinic';
+    case 'associationOffer':
+      return 'medicalAssociation';
   }
 }
 

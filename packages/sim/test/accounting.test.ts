@@ -123,6 +123,7 @@ describe('三表の組み立て', () => {
     contractRevenue: 0,
     externalRelationCost: 0,
     systemCost: 0,
+    marketing: 0,
   };
 
   // 期首は 現金 10,000 ＋ 未収金 2,000 ＋ 固定資産 3,000 ＝ 純資産 15,000 で釣り合っている。

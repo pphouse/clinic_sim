@@ -5,6 +5,10 @@
  * 「複数画面で使う数字」は例外なくこのファイルに置く。
  */
 import {
+  AWARENESS_BASE,
+  AWARENESS_MAX,
+  MARKETING_LEVELS,
+  marketingLevelOf,
   CLINICS,
   EMR_TIERS,
   MONTHS_PER_YEAR,
@@ -13,6 +17,7 @@ import {
   REPUTATION_MIN,
   TOLERABLE_WAIT_MINUTES,
   emrMigrationCost,
+  districtDemand,
 } from './constants';
 import { SCHOOL_DURATION_MONTHS, SCHOOL_GRADUATES_PER_CLASS, enrolledClasses } from './staff';
 import { CRITICAL_WAIT_MINUTES } from './events';
@@ -23,6 +28,7 @@ import type {
   ExternalRelationId,
   GameEvent,
   Man,
+  MarketingLevelId,
   Month,
   MonthResult,
   RelationView,
@@ -276,6 +282,42 @@ export function clinicSummaries(result: MonthResult): ClinicSummary[] {
   }));
 }
 
+/**
+ * 医師の調達状況。
+ *
+ * ★この derive を足したのは、**枠が無いことが診療所画面に入るまで分からなかった**から。
+ * 分院を建てて「＋」が押せず、理由も次にどこへ行けばいいかも画面に出ていなかった。
+ * マップと診療所の両方が同じ数字を読む必要があるので、ここに置く（CLAUDE.md §2）。
+ */
+export interface DoctorProcurement {
+  /** いま置けている常勤医 */
+  total: number;
+  /** 医局の派遣枠＋紹介会社の累計採用 */
+  procurable: number;
+  /**
+   * 空いている枠。0 なら医局か紹介会社へ行くまで1人も増やせない。
+   * ★単位は「枠」であって「人」ではない。科によっては1人が複数枠を食う（doctorScarcity）
+   */
+  free: number;
+  /** 置きたかったのに枠が足りず空いたままの席 */
+  unfilled: number;
+  /** 開院済みなのに常勤医が1人も居ない院。看板だけなので患者が来ない */
+  emptyClinics: ClinicId[];
+}
+
+export function doctorProcurement(result: MonthResult): DoctorProcurement {
+  const staff = result.staff;
+  return {
+    total: staff.doctorsTotal,
+    procurable: staff.doctorsProcurable,
+    free: Math.max(0, staff.doctorsProcurable - staff.doctorsTotal),
+    unfilled: staff.doctorsUnfilled,
+    emptyClinics: result.clinics
+      .filter((c) => c.open && (staff.doctorsByClinic[c.id] ?? 0) === 0)
+      .map((c) => c.id),
+  };
+}
+
 /** 全社の当月サマリ。マップ上部に出す */
 export interface GroupSummary {
   patientStock: number;
@@ -295,6 +337,277 @@ export function groupSummary(result: MonthResult, previous: MonthResult | null):
     cashDelta: previous ? cash - previous.financials.balanceSheet.cash : null,
     operatingIncome: deriveGroupTotals(result).operatingIncome,
   };
+}
+
+// ---------------------------------------------------------------- 競合の詳細
+//
+// docs/spec/screens/map.md「競合の詳細」
+
+export interface CompetitorDetail {
+  id: string;
+  name: string;
+  districtId: string;
+  districtName: string;
+  specialtyName: string;
+  /** 競合の魅力。自院の魅力と直接比べられる数字 */
+  strength: number;
+  share: number;
+  openedAtMonth: Month;
+  /** 押し込めていれば「あと何ヶ月で出ていくか」。押し込めていなければ null */
+  monthsToExit: number | null;
+  /** そのセグメントを独占したときの月の新規患者 */
+  segmentDemand: number;
+  /** そのセグメントに居る自院 */
+  ownClinics: { id: ClinicId; name: string; share: number; attractiveness: number }[];
+  /** 自院の魅力の合計。strength と並べて出す */
+  ownAttractiveness: number;
+  ownShare: number;
+  /** 同じセグメントの競合すべて（この競合を含む） */
+  rivals: { id: string; name: string; strength: number; share: number }[];
+}
+
+/**
+ * 競合1軒の詳細。マップでピンを押したときに出す。
+ *
+ * ★**「勝てるのか」に答えるための数字だけを出す。**
+ * 強さと自院の魅力を並べ、押し込みの残り月数を出す。
+ * 商圏の需要を出すのは「取ったらいくらになるか」が判断の材料になるから。
+ */
+export function competitorDetail(
+  result: MonthResult,
+  rivalId: string,
+): CompetitorDetail | null {
+  const segment = result.market.districts.find((d) =>
+    d.competitors.some((c) => c.id === rivalId),
+  );
+  const rival = segment?.competitors.find((c) => c.id === rivalId);
+  if (!segment || !rival) return null;
+
+  const ownAttractiveness = segment.clinics.reduce((sum, c) => sum + c.attractiveness, 0);
+  return {
+    id: rival.id,
+    name: rival.name,
+    districtId: segment.id,
+    districtName: segment.name,
+    specialtyName: segment.specialtyName,
+    strength: rival.strength,
+    share: rival.share,
+    openedAtMonth: rival.openedAtMonth,
+    monthsToExit: rival.monthsToExit,
+    segmentDemand: districtDemand(segment.id, segment.specialtyId),
+    ownClinics: segment.clinics.map((c) => ({
+      id: c.id,
+      name: c.name,
+      share: c.share,
+      attractiveness: c.attractiveness,
+    })),
+    ownAttractiveness,
+    ownShare: segment.ownShare,
+    rivals: segment.competitors.map((c) => ({
+      id: c.id,
+      name: c.name,
+      strength: c.strength,
+      share: c.share,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------- 集患
+//
+// docs/spec/07-awareness.md
+
+export interface MarketingOption {
+  id: MarketingLevelId;
+  name: string;
+  character: string;
+  costPerMonth: Man;
+  /** この段階に切り替えたときの認知度の落ち着き先 */
+  ceiling: number;
+  current: boolean;
+}
+
+export interface AwarenessView {
+  awareness: number;
+  /** いまの段階での落ち着き先 */
+  ceiling: number;
+  level: MarketingLevelId;
+  costPerMonth: Man;
+  /** 口コミのぶん。患者が増えると自然に上がる分 */
+  wordOfMouth: number;
+  options: MarketingOption[];
+}
+
+/**
+ * 集患の現在地。診療所画面が読む。
+ *
+ * ★段階を切り替えたときの落ち着き先まで出す。**選ぶ前に効き目が見えないと選べない。**
+ * 口コミのぶんは ClinicTick から逆算する（同じ院なら段階を変えても口コミは変わらない）。
+ */
+export function awarenessView(tick: ClinicTick): AwarenessView {
+  const wordOfMouth = Math.max(
+    0,
+    tick.awarenessCeiling - AWARENESS_BASE - marketingLevelOf(tick.marketingLevel).reach,
+  );
+  return {
+    awareness: tick.awareness,
+    ceiling: tick.awarenessCeiling,
+    level: tick.marketingLevel,
+    costPerMonth: tick.marketingCost,
+    wordOfMouth,
+    options: MARKETING_LEVELS.map((m) => ({
+      id: m.id,
+      name: m.name,
+      character: m.character,
+      costPerMonth: m.costPerMonth,
+      ceiling: Math.min(AWARENESS_MAX, AWARENESS_BASE + m.reach + wordOfMouth),
+      current: m.id === tick.marketingLevel,
+    })),
+  };
+}
+
+/** 全社の広告宣伝費。UI が合計を出さなくて済むように */
+export function totalMarketingCost(result: MonthResult): Man {
+  return result.financials.incomeStatement.marketing;
+}
+
+// ---------------------------------------------------------------- 月次ダイジェスト
+//
+// docs/spec/screens/month-digest.md
+//
+// ★「翌月へ」を押した結果が、どこにも出ていなかった。
+// マップの数字が静かに書き変わるだけなので、10回押しても何が起きたか分からない。
+// このゲームの主題は遅延なので、押した結果が見えないのは致命的に相性が悪い。
+//
+// **何を出すかを決めるのはここ。** UI は並べて動かすだけ（CLAUDE.md §2）。
+
+export type DigestUnit = 'people' | 'man' | 'minutes' | 'stars';
+
+export interface DigestLine {
+  id: string;
+  label: string;
+  /** 今月の値 */
+  value: number;
+  /** 前月の値。UI はここから今月の値へ数え上げる */
+  from: number;
+  delta: number;
+  unit: DigestUnit;
+  /**
+   * 増えるのが良いか。★向きを sim が持つ。
+   * 待ち時間だけ逆なので、UI 側に「待ち時間は増えたら赤」と書くと別の画面で必ず忘れる
+   */
+  higherIsBetter: boolean;
+}
+
+export interface MonthDigest {
+  month: Month;
+  /** 何ヶ月ぶんか。1 なら1ヶ月。まとめて進んだときは2以上 */
+  spanMonths: number;
+  lines: DigestLine[];
+  /** その月の出来事。これまで通知はマップのバッジにしか出ていなかった */
+  events: GameEvent[];
+  /** いちばん大きく動いた行から作る一言 */
+  headline: string;
+}
+
+/** 単位ごとの動詞。「待ち時間が増えた」より「待ち時間が伸びた」の方が速く読める */
+const DIGEST_VERB: Record<DigestUnit, [up: string, down: string]> = {
+  people: ['増えた', '減った'],
+  man: ['伸びた', '沈んだ'],
+  minutes: ['伸びた', '縮んだ'],
+  stars: ['上がった', '下がった'],
+};
+
+/** これ未満の相対変化しかなければ「変化なし」。桁の違う指標を比べるので比率で見る */
+const DIGEST_HEADLINE_THRESHOLD = 0.02;
+
+export function monthDigest(current: MonthResult, previous: MonthResult | null): MonthDigest {
+  const openNow = current.clinics.some((c) => c.open);
+  const worstNow = worstWait(current);
+  const worstBefore = previous ? worstWait(previous) : null;
+
+  const line = (
+    id: string,
+    label: string,
+    unit: DigestUnit,
+    higherIsBetter: boolean,
+    value: number,
+    from: number,
+  ): DigestLine => ({ id, label, unit, higherIsBetter, value, from, delta: value - from });
+
+  const lines: DigestLine[] = [
+    line(
+      'patientStock',
+      '通院患者',
+      'people',
+      true,
+      totalPatientStock(current),
+      previous ? totalPatientStock(previous) : 0,
+    ),
+    line(
+      'operatingIncome',
+      '営業利益',
+      'man',
+      true,
+      deriveGroupTotals(current).operatingIncome,
+      previous ? deriveGroupTotals(previous).operatingIncome : 0,
+    ),
+    line(
+      'cash',
+      '現金',
+      'man',
+      true,
+      current.financials.balanceSheet.cash,
+      previous ? previous.financials.balanceSheet.cash : current.financials.balanceSheet.cash,
+    ),
+  ];
+
+  // 診療所が1つも開いていない月は待ち時間も評判も意味を持たない。行ごと落とす
+  if (openNow && worstNow) {
+    lines.push(
+      line('waitMinutes', '待ち時間', 'minutes', false, worstNow.waitMinutes, worstBefore?.waitMinutes ?? worstNow.waitMinutes),
+      line(
+        'reputation',
+        '評判',
+        'stars',
+        true,
+        reputationStars(groupReputation(current)),
+        previous ? reputationStars(groupReputation(previous)) : reputationStars(groupReputation(current)),
+      ),
+    );
+  }
+
+  return {
+    month: current.month,
+    spanMonths: previous ? Math.max(1, current.month - previous.month) : 1,
+    lines,
+    events: current.events,
+    headline: digestHeadline(lines),
+  };
+}
+
+/*
+ * ★「判断まで進む」は作ったあとに外した（docs/spec/08-decisions.md §4）。
+ *
+ * 次に手が要る月まで一気に進める仕組みで、120回の月送りが7回になった。
+ * ただしこのゲームの主題は遅延で、遅延は**待つ月を数えて初めて痛みになる**。
+ * まとめて飛ばすと3ヶ月の遅れが1回の画面遷移に潰れ、手応えそのものが消えた。
+ * 月は1つずつ進める。ダイジェストは常に1ヶ月ぶん。
+ */
+
+function digestHeadline(lines: DigestLine[]): string {
+  let best: DigestLine | null = null;
+  let bestScore = 0;
+  for (const l of lines) {
+    // 現金100万と患者100人は比べられないので、前月比の比率で見る
+    const score = Math.abs(l.delta) / Math.max(Math.abs(l.from), 1);
+    if (score > bestScore) {
+      bestScore = score;
+      best = l;
+    }
+  }
+  if (!best || bestScore < DIGEST_HEADLINE_THRESHOLD) return '大きな動きは無い';
+  const [up, down] = DIGEST_VERB[best.unit];
+  return `${best.label}が${best.delta > 0 ? up : down}`;
 }
 
 // ---------------------------------------------------------------- 看護学校

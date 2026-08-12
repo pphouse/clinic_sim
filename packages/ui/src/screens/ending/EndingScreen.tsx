@@ -14,7 +14,7 @@ import { compactMan, man, people } from '../../format';
 const REASON_LEAD: Record<string, string> = {
   goal: '目標に到達しました',
   timeUp: '10年が終わりました',
-  bankrupt: '債務超過が1年続き、法人が立ち行かなくなりました',
+  bankrupt: '債務超過のまま赤字が1年続き、法人が立ち行かなくなりました',
 };
 
 function goalValueText(g: GoalProgress): string {
@@ -109,9 +109,12 @@ export function EndingScreen({
           <>
             <SectionTitle>何が起きたか</SectionTitle>
             <Note>
-              債務超過が12ヶ月続きました。<strong>1ヶ月の谷では終わりません。</strong>
+              <strong>債務超過のまま、経常赤字が12ヶ月続きました。</strong>
               大型投資の直後に現金が沈むのは正常で、そこで殺すと正しい投資が全部悪手になる。
-              1年沈みっぱなしなら、それはもう谷ではないという判定です。
+              だから条件は2つある。純資産がマイナスでも
+              <strong>黒字で回っているあいだは潰れません</strong>
+              （返している最中と、潰れているのは違う）。
+              開業から3年も数え始めません。それでも赤字が1年続いたなら、それは谷ではない。
             </Note>
           </>
         )}

@@ -27,9 +27,11 @@ import {
   type MonthDecision,
   type MonthResult,
 } from '../src/index';
+import { withOpeningA } from './helpers';
 
 const at = (run: { months: MonthResult[] }, month: number) => run.months[month - 1]!;
-const play = (decisions: MonthDecision[]) => runSimulation({ ...PLAY_SCENARIO, decisions });
+const play = (decisions: MonthDecision[]) =>
+  runSimulation({ ...PLAY_SCENARIO, decisions: withOpeningA(decisions) });
 const honmachi = (m: MonthResult) => m.market.districts.find((d) => d.id === 'honmachi')!;
 
 // ==================================================================
@@ -106,6 +108,45 @@ describe('魅力', () => {
     expect(out.shareByClinic['A']).toBe(0);
     const seg = out.tick.districts.find((d) => d.id === 'honmachi')!;
     expect(seg.competitors[0]!.share).toBe(1);
+  });
+
+  /**
+   * ★競合の居ないセグメントに医師0の院を出したとき、
+   * 0除算よけが等分に落ちてシェア1を渡していた。
+   * 「看板だけの院に患者は来ない」が、独占のときだけ破れていた。
+   */
+  it('競合が1軒も居なくても、医師0ならシェアは0', () => {
+    const out = tickMarket({
+      month: 1,
+      clinics: [
+        {
+          config: { ...CLINICS[0]!, districtId: 'ekimae', specialtyId: 'hifuka' },
+          open: true,
+          reputation: 75,
+          waitMinutes: 0,
+          doctors: 0,
+        },
+      ],
+      competitors: [],
+    });
+    expect(out.shareByClinic['A']).toBe(0);
+  });
+
+  it('医師を1人置けばシェアは1に戻る。独占は独占のまま', () => {
+    const out = tickMarket({
+      month: 1,
+      clinics: [
+        {
+          config: { ...CLINICS[0]!, districtId: 'ekimae', specialtyId: 'hifuka' },
+          open: true,
+          reputation: 75,
+          waitMinutes: 0,
+          doctors: 1,
+        },
+      ],
+      competitors: [],
+    });
+    expect(out.shareByClinic['A']).toBe(1);
   });
 });
 

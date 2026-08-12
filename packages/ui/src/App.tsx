@@ -21,11 +21,15 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   CLINIC_SITES,
   PLAY_SCENARIO,
+  competitorDetail,
   createSave,
+  monthDigest,
   runSimulation,
   scenarioFromSave,
   type ClinicId,
   type ClinicSite,
+  type FitoutId,
+  type MarketingLevelId,
   type Month,
   type SpecialtyId,
   type MonthDecision,
@@ -37,6 +41,8 @@ import { MapScreen } from './screens/map/MapScreen';
 import { BuildingScreen } from './screens/buildings/BuildingScreens';
 import { EndingScreen } from './screens/ending/EndingScreen';
 import { OpeningScreen } from './screens/opening/OpeningScreen';
+import { MonthDigestOverlay } from './screens/digest/MonthDigestOverlay';
+import { CompetitorScreen } from './screens/map/CompetitorScreen';
 import { clearSave, loadSave, writeSave } from './game/storage';
 
 const freshSave = (): SaveData => createSave(PLAY_SCENARIO, 1, PLAY_SCENARIO.decisions);
@@ -52,6 +58,14 @@ export function App() {
   const [endingDismissed, setEndingDismissed] = useState(false);
   /** 開院画面で選んでいる候補地。科をここで決める */
   const [openingSite, setOpeningSite] = useState<ClinicSite | null>(null);
+  /**
+   * ダイジェストを出す月。「翌月へ」で進んだ直後だけ立つ。
+   * ★過去を見に行っただけでは出さない。月が**確定した**ときの手応えだから
+   * （docs/spec/screens/month-digest.md）
+   */
+  const [digestMonth, setDigestMonth] = useState<Month | null>(null);
+  /** 開いている競合。マップのピンから入る */
+  const [openCompetitor, setOpenCompetitor] = useState<string | null>(null);
 
   const run = useMemo(() => runSimulation(scenarioFromSave(PLAY_SCENARIO, save)), [save]);
 
@@ -72,12 +86,18 @@ export function App() {
     setViewMonth(Math.min(maxViewMonth, Math.max(1, next)));
   }
 
-  /** 1ヶ月進める。**押した瞬間に確定して、戻せない** */
+  /**
+   * 1ヶ月進める。**押した瞬間に確定して、戻せない**
+   *
+   * ★まとめて飛ばす道は用意しない（docs/spec/08-decisions.md §4）。
+   * このゲームの主題は遅延で、遅延は待つ月を数えて初めて痛みになる。
+   */
   function advance() {
     if (end.ended || save.currentMonth >= run.months.length) return;
     const next = save.currentMonth + 1;
     setSave((s) => ({ ...s, currentMonth: next }));
     setViewMonth(next);
+    setDigestMonth(next);
   }
 
   /**
@@ -97,6 +117,8 @@ export function App() {
           ...patch,
           // 書いた分だけ上書きする。丸ごと置き換えない
           doctorsByClinic: { ...existing.doctorsByClinic, ...patch.doctorsByClinic },
+          eventChoices: { ...existing.eventChoices, ...patch.eventChoices },
+          marketingByClinic: { ...existing.marketingByClinic, ...patch.marketingByClinic },
           relationActivity: { ...existing.relationActivity, ...patch.relationActivity },
         };
         return { ...s, decisions: updated };
@@ -116,6 +138,8 @@ export function App() {
     setEndingDismissed(false);
     setOpenClinic(null);
     setOpenBuilding(null);
+    setDigestMonth(null);
+    setOpenCompetitor(null);
   }
 
   const setDoctors = (clinicId: ClinicId, next: number) =>
@@ -135,14 +159,52 @@ export function App() {
     );
   }
 
+  /**
+   * 進んだ直後の1回だけ出す。終局した月には出さない（終局画面と2枚重ねない）。
+   * 差分は sim が全部持ってくる。ここで引き算しない（CLAUDE.md §2）
+   */
+  const digest =
+    digestMonth !== null && digestMonth === save.currentMonth && !end.ended && digestMonth > 1
+      ? monthDigest(run.months[digestMonth - 1]!, run.months[digestMonth - 2] ?? null)
+      : null;
+
+  const overlay = digest && (
+    <MonthDigestOverlay
+      digest={digest}
+      answerableMonth={save.currentMonth}
+      onChoose={
+        isPresent
+          ? (key, choiceId) => applyDecision({ eventChoices: { [key]: choiceId } })
+          : undefined
+      }
+      onDismiss={() => setDigestMonth(null)}
+    />
+  );
+
+  const competitor =
+    openCompetitor !== null ? competitorDetail(result, openCompetitor) : null;
+  if (competitor) {
+    return (
+      <CompetitorScreen
+        detail={competitor}
+        currentMonth={result.month}
+        onClose={() => setOpenCompetitor(null)}
+      />
+    );
+  }
+
   if (openingSite !== null) {
     return (
       <OpeningScreen
         site={openingSite}
         result={result}
         cash={result.financials.balanceSheet.cash}
-        onOpen={(specialty: SpecialtyId) => {
-          applyDecision({ openClinic: openingSite.id, openSpecialty: specialty });
+        onOpen={(specialty: SpecialtyId, fitout: FitoutId) => {
+          applyDecision({
+            openClinic: openingSite.id,
+            openSpecialty: specialty,
+            openFitout: fitout,
+          });
           setOpeningSite(null);
         }}
         onClose={() => setOpeningSite(null)}
@@ -152,57 +214,77 @@ export function App() {
 
   if (openBuilding !== null) {
     return (
-      <BuildingScreen
-        screen={openBuilding}
-        result={result}
-        previous={previous}
-        history={run.months}
-        onClose={() => setOpenBuilding(null)}
-        onDecision={isPresent ? applyDecision : undefined}
-      />
+      <>
+        <BuildingScreen
+          screen={openBuilding}
+          result={result}
+          previous={previous}
+          history={run.months}
+          onClose={() => setOpenBuilding(null)}
+          onDecision={isPresent ? applyDecision : undefined}
+        />
+        {overlay}
+      </>
     );
   }
 
   if (openClinic === null) {
     return (
-      <MapScreen
-        result={result}
-        previous={previous}
-        onOpenClinic={setOpenClinic}
-        onOpenBuilding={setOpenBuilding}
-        onMonthChange={(delta) => goToMonth(month + delta)}
-        currentMonth={save.currentMonth}
-        isPresent={isPresent}
-        onAdvance={advance}
-        onShowEnding={end.ended ? () => setEndingDismissed(false) : undefined}
-        onDecision={isPresent ? applyDecision : undefined}
-        onChooseSite={
-          isPresent
-            ? (id) => setOpeningSite(CLINIC_SITES.find((s) => s.id === id) ?? null)
-            : undefined
-        }
-        canGoBack={month > 1}
-        canGoForward={month < maxViewMonth}
-      />
+      <>
+        <MapScreen
+          result={result}
+          previous={previous}
+          onOpenClinic={setOpenClinic}
+          onOpenBuilding={setOpenBuilding}
+          onMonthChange={(delta) => goToMonth(month + delta)}
+          currentMonth={save.currentMonth}
+          isPresent={isPresent}
+          onAdvance={advance}
+          onShowEnding={end.ended ? () => setEndingDismissed(false) : undefined}
+          onDecision={isPresent ? applyDecision : undefined}
+          onChooseSite={
+            isPresent
+              ? (id) => setOpeningSite(CLINIC_SITES.find((s) => s.id === id) ?? null)
+              : undefined
+          }
+          onOpenCompetitor={setOpenCompetitor}
+          canGoBack={month > 1}
+          canGoForward={month < maxViewMonth}
+        />
+        {overlay}
+      </>
     );
   }
 
   return (
-    <ClinicScreen
-      clinicId={openClinic}
-      clinicName={clinicName}
-      result={result}
-      previous={previous}
-      history={run.months}
-      tab={tab}
-      onTabChange={setTab}
-      onClose={() => setOpenClinic(null)}
-      onDoctorsChange={isPresent ? (next) => setDoctors(openClinic, next) : undefined}
-      onMonthChange={(delta) => goToMonth(month + delta)}
-      canGoBack={month > 1}
-      canGoForward={month < maxViewMonth}
-      modified={false}
-      onReset={restart}
-    />
+    <>
+      <ClinicScreen
+        clinicId={openClinic}
+        clinicName={clinicName}
+        result={result}
+        previous={previous}
+        history={run.months}
+        tab={tab}
+        onTabChange={setTab}
+        onClose={() => setOpenClinic(null)}
+        onOpenBuilding={(id) => {
+          setOpenClinic(null);
+          setOpenBuilding(id);
+        }}
+        onDoctorsChange={isPresent ? (next) => setDoctors(openClinic, next) : undefined}
+        onMarketingChange={
+          isPresent
+            ? (level: MarketingLevelId) =>
+                applyDecision({ marketingByClinic: { [openClinic]: level } })
+            : undefined
+        }
+        onMonthChange={(delta) => goToMonth(month + delta)}
+        canGoBack={month > 1}
+        canGoForward={month < maxViewMonth}
+        modified={false}
+        onReset={restart}
+      />
+      {overlay}
+    </>
   );
 }

@@ -30,6 +30,12 @@ export type DistrictId = string;
 /** 診療科。docs/spec/05-specialty.md */
 export type SpecialtyId = 'naika' | 'shonika' | 'seikei' | 'hifuka' | 'ganka' | 'seishin';
 
+/** 内装グレード。開業時に決めて、あとから変えられない（docs/spec/06-opening.md §4） */
+export type FitoutId = 'basic' | 'standard' | 'premium';
+
+/** 集患投資の段階。院ごとに毎月決める（docs/spec/07-awareness.md §3） */
+export type MarketingLevelId = 'none' | 'local' | 'web' | 'heavy';
+
 /**
  * 科の性格。**内科の値は検証済みの定数そのもの**（倍率ではなく実数で持つ）。
  * 既定シナリオは全て内科なので、科を足しても検証済みの数字は動かない。
@@ -74,6 +80,35 @@ export interface ClinicConfig {
   newPatientPotential: number;
   /** 承継開業なら引き継ぐ患者数。新規開業は 0 */
   initialPatientStock: number;
+
+  // ---------------- 開業で焼き付ける値（docs/spec/06-opening.md §3）
+  //
+  // ★**持っていない院は従来どおりの経路を通る。**
+  // BASELINE_SCENARIO の3院はどれも持たないので、検証済みの資金繰りは動かない。
+
+  /** 開業時に決めた内装グレード。開院後は変えられない */
+  fitoutId?: FitoutId;
+  /**
+   * その院の評判が落ち着く先。内装で決まる。
+   * 未設定なら BASELINE_REPUTATION（＝恒等式）
+   */
+  baselineReputation?: number;
+  /** 実際に払った設備投資。立地 × 科 × 内装 */
+  capex?: Man;
+  /** 実際に組んだ開業融資。足りない分だけ借りる */
+  openingLoan?: Man;
+  /**
+   * 立ち上がりの強さ（docs/spec/06-opening.md §6）。
+   * 患者が埋まっていない院ほど新規が増える。**落ち着き先は変わらない。**
+   * 未設定なら 0（＝恒等式）
+   */
+  newPatientRamp?: number;
+  /**
+   * 開院時の認知度 0〜1（docs/spec/07-awareness.md）。
+   * ★**未設定の院は認知度という概念を持たず、係数が常に 1**（＝恒等式）。
+   * 承継は看板と地域の記憶を引き継ぐので高い
+   */
+  initialAwareness?: number;
 }
 
 export interface ClinicState {
@@ -90,6 +125,11 @@ export interface ClinicState {
    */
   reputationHistory: number[];
   doctors: number;
+  /**
+   * 認知度 0〜1。その商圏の人がこの医院を知っているか。
+   * 認知度を持たない院（＝シナリオが直接持っている院）は 1 のまま動かない
+   */
+  awareness: number;
 }
 
 /** 1 ヶ月の診療所シミュレーション結果 */
@@ -124,6 +164,13 @@ export interface ClinicTick {
   selfPayRevenue: Man;
   operatingCost: Man;
   operatingIncome: Man;
+  /** 認知度 0〜1。認知度を持たない院は 1 */
+  awareness: number;
+  /** いま打っている集患投資が届く先。認知度はここへ向かって動く */
+  awarenessCeiling: number;
+  marketingLevel: MarketingLevelId;
+  /** その院の今月の広告宣伝費 */
+  marketingCost: Man;
 }
 
 // ---------------------------------------------------------------- 人材
@@ -266,6 +313,8 @@ export interface IncomeStatement {
   externalRelationCost: Man;
   /** 電子カルテ・AI の月額、機器のリース料と保守料 */
   systemCost: Man;
+  /** 広告宣伝費（集患投資）。販管費なので営業利益の上 */
+  marketing: Man;
   /** 本部費 */
   headquarters: Man;
   totalExpenses: Man;
@@ -535,6 +584,11 @@ export interface GameState {
   personalAssets: string[];
   /** 盤上の競合。既定シナリオでは空 */
   competitors: CompetitorState[];
+  /**
+   * 開業据置の明ける月（docs/spec/06-opening.md §7）。
+   * **最初の開業の1回だけ立つ。** 意思決定で開院しない既定シナリオでは null のまま。
+   */
+  openingGraceUntilMonth: Month | null;
 }
 
 /** 1 ヶ月の全出力。UI はこれだけを読む */
@@ -564,6 +618,16 @@ export interface GameEvent {
   screen: ScreenId;
   title: string;
   body: string;
+  /**
+   * 選択を迫るイベントの鍵と選択肢（docs/spec/08-decisions.md §2）。
+   * **空なら知らせるだけ。** UI はここがあるときだけ選択肢を出す
+   */
+  choiceKey?: string;
+  choices?: EventChoice[];
+  /** いま効いている選択肢の id。**答えていなければ既定のもの** */
+  chosen?: string;
+  /** プレイヤーが自分で答えたか。false なら既定に倒れているだけ */
+  answered?: boolean;
 }
 
 // ---------------------------------------------------------------- 商圏と競合
@@ -702,16 +766,55 @@ export type RandomEventId =
   | 'nurseExodus'
   | 'competitorOpened'
   | 'bureauAudit'
-  | 'epidemic';
+  | 'epidemic'
+  | 'badReview'
+  | 'apartmentBuilt'
+  | 'associationOffer';
 
 /** 起きてしまった突発事象。効果は既に state へ適用済み */
+/**
+ * イベントの選択肢が動かせるもの。**語彙はここで閉じている**
+ * （docs/spec/08-decisions.md §2）。新しい因果を発明しない。
+ */
+export interface EventEffect {
+  /** 即時の現金支出。P/L の特別損失に落ちる */
+  cost?: Man;
+  /** 医師が抜けるのを止める */
+  keepDoctor?: boolean;
+  /** 看護師の離職を止める */
+  keepNurses?: boolean;
+  /** その院の評判への即時の増減 */
+  reputationDelta?: number;
+  /** その院の新規患者ポテンシャルへの恒久倍率 */
+  potentialMultiplier?: number;
+  /** 外部関係値の増減 */
+  relationDelta?: { id: ExternalRelationId; value: number };
+}
+
+export interface EventChoice {
+  id: string;
+  label: string;
+  /** 何が起きるかの一言。**選ぶ前に代償が見えること** */
+  detail: string;
+  effect: EventEffect;
+  /** 答えなかったときに適用される。1つのイベントに必ず1つある */
+  isDefault?: boolean;
+}
+
 export interface RandomEventOccurrence {
   id: RandomEventId;
+  /**
+   * 一意の鍵。`${id}-${clinicId ?? 'group'}-${month}`。
+   * ★**意思決定の記録がこの鍵で紐づく**ので、作り方を変えると古いセーブの答えが外れる
+   */
+  key: string;
   month: Month;
   clinicId?: ClinicId;
   title: string;
   body: string;
   severity: 'info' | 'warning' | 'critical';
+  /** 選択を迫るなら。**空なら知らせるだけ** */
+  choices?: EventChoice[];
 }
 
 export type ScreenId =

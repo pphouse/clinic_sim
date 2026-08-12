@@ -12,6 +12,7 @@ import {
   MONTHS_PER_YEAR,
   districtNameOf,
   clinicSummaries,
+  doctorProcurement,
   groupSummary,
   monthLabel,
   reputationStars,
@@ -85,7 +86,7 @@ export interface MapScreenProps {
   currentMonth: number;
   /** 「今」を見ているか。過去を見ているあいだは進めるボタンを出さない */
   isPresent: boolean;
-  /** 1ヶ月進める */
+  /** 1ヶ月進める。まとめて飛ばす道は無い（docs/spec/08-decisions.md §4） */
   onAdvance: () => void;
   /** 終局後だけ。結果画面へ戻る */
   onShowEnding?: () => void;
@@ -93,6 +94,8 @@ export interface MapScreenProps {
   onDecision?: (patch: Partial<MonthDecision>) => void;
   /** 候補地を選んで開院画面へ。科はあちらで決める */
   onChooseSite?: (id: ClinicId) => void;
+  /** 競合のピンを押したとき。相手の素性と押し出せるかを見せる */
+  onOpenCompetitor?: (id: string) => void;
   canGoBack: boolean;
   canGoForward: boolean;
 }
@@ -105,6 +108,7 @@ export function MapScreen(props: MapScreenProps) {
   // 足りない額まで見せる。「いくら足りないか」が次の判断になる
   const sites = CLINIC_SITES.filter((site) => !summaries.some((c) => c.id === site.id));
   const rivals = result.market.districts.flatMap((d) => d.competitors);
+  const doctors = doctorProcurement(result);
 
   return (
     <div
@@ -189,7 +193,11 @@ export function MapScreen(props: MapScreenProps) {
           />
           {/* 競合を先に描く。自院のピンが上に重なるように */}
           {rivals.map((rival) => (
-            <CompetitorPin key={rival.id} rival={rival} />
+            <CompetitorPin
+              key={rival.id}
+              rival={rival}
+              onOpen={() => props.onOpenCompetitor?.(rival.id)}
+            />
           ))}
           {summaries.map((clinic) => (
             <MapPin
@@ -201,6 +209,63 @@ export function MapScreen(props: MapScreenProps) {
         </div>
 
         <div style={{ padding: 'var(--space-4)' }}>
+          {/*
+            ★1院目を開くまで、この画面には他にやることが無い。
+            候補地の一覧は下にあるが、それが「今やること」だと分からない。
+            開業はこのゲームで最初に効く遅延なので、迷わせない（docs/spec/06-opening.md）
+          */}
+          {summaries.length === 0 && props.onChooseSite && (
+            <div
+              data-testid="open-first-clinic"
+              style={{
+                marginBottom: 'var(--space-3)',
+                padding: 'var(--space-3)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--hq-accent)',
+                background: 'rgba(90, 155, 184, 0.09)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 'var(--text-label)',
+                  fontWeight: 600,
+                  color: 'var(--hq-accent)',
+                  marginBottom: 4,
+                }}
+              >
+                まず1院目を開きます
+              </div>
+              <div
+                style={{
+                  fontSize: 'var(--text-caption)',
+                  color: 'var(--paper-dim)',
+                  lineHeight: 1.6,
+                }}
+              >
+                手元にあるのは自己資金 <span className="num">{compactMan(group.cash)}円</span> だけ。
+                設備投資は<strong>足りないぶんを全部借りる</strong>ことになります。
+                どこで・何科を・どんな内装で開くかで、背負う額が変わる。
+                <br />
+                開業しないまま月を送っても、本部費だけが出ていきます。
+              </div>
+            </div>
+          )}
+
+          {/*
+            ★医師の枠。**建てたのに医師を置けない**のがこのゲームで一番詰まる場所で、
+            以前は診療所画面に入って「＋」が押せないことで初めて分かった。
+            枠が無いことと、次にどこへ行けばいいかをマップに出す。
+          */}
+          {props.onDecision && (doctors.emptyClinics.length > 0 || doctors.unfilled > 0) && (
+            <DoctorAlert
+              doctors={doctors}
+              emptyNames={doctors.emptyClinics.map(
+                (id) => summaries.find((c) => c.id === id)?.name ?? id,
+              )}
+              onOpenBuilding={props.onOpenBuilding}
+            />
+          )}
+
           {summaries.map((clinic) => (
             <ClinicRow
               key={clinic.id}
@@ -221,7 +286,7 @@ export function MapScreen(props: MapScreenProps) {
                   letterSpacing: '0.08em',
                 }}
               >
-                開院できる候補地
+                {summaries.length === 0 ? '開業できる候補地' : '開院できる候補地'}
               </h2>
               {sites.map((site) => {
                 // 投資額は科で変わる（眼科は2倍、精神科は半分）。ここでは最小額を出す
@@ -525,20 +590,104 @@ function SummaryCell({
 }
 
 /**
+ * 医師が足りていないときの警告。
+ *
+ * 出す条件を「枠が0」ではなく「**置けていない席がある**」にしているのは、
+ * 枠が余っているだけなら困っていないから。困っている人にだけ出す。
+ */
+function DoctorAlert({
+  doctors,
+  emptyNames,
+  onOpenBuilding,
+}: {
+  doctors: ReturnType<typeof doctorProcurement>;
+  emptyNames: string[];
+  onOpenBuilding: (id: ScreenId) => void;
+}) {
+  const noSlots = doctors.free <= 0;
+
+  return (
+    <div
+      data-testid="doctor-alert"
+      style={{
+        marginBottom: 'var(--space-3)',
+        padding: 'var(--space-3)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--warning)',
+        background: 'rgba(224, 166, 60, 0.08)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 'var(--text-label)',
+          fontWeight: 600,
+          color: 'var(--warning)',
+          marginBottom: 4,
+        }}
+      >
+        {emptyNames.length > 0
+          ? `${emptyNames.join('・')}に常勤医が居ません`
+          : `常勤医が ${doctors.unfilled}名 置けていません`}
+      </div>
+      <div
+        style={{
+          fontSize: 'var(--text-caption)',
+          color: 'var(--paper-dim)',
+          lineHeight: 1.6,
+        }}
+      >
+        {emptyNames.length > 0 && '医師の居ない院に患者は来ません。'}
+        常勤医は<strong>枠のぶんしか置けない</strong>（いま
+        <span className="num">
+          {doctors.total}/{doctors.procurable}
+        </span>
+        枠）。
+        {noSlots
+          ? '枠が空いていないので、紹介会社で買うか、医局の関係値を上げてください。'
+          : '診療所の画面を開いて＋で置いてください。'}
+      </div>
+      {noSlots && (
+        <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            data-testid="alert-goto-agency"
+            style={{ flex: 1 }}
+            onClick={() => onOpenBuilding('agency')}
+          >
+            紹介会社で枠を買う
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{ flex: 1 }}
+            onClick={() => onOpenBuilding('igyoku')}
+          >
+            医局へ
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * 競合のピン。**自院より弱く描く。** 塗りを持たせず、輪郭だけ。
  * 地図の主役は自院で、競合は環境（docs/spec/04-market.md §5）。
  * 押せない。中に入る用事が無い相手なので、押せる形にしない。
  */
-function CompetitorPin({ rival }: { rival: CompetitorView }) {
+function CompetitorPin({ rival, onOpen }: { rival: CompetitorView; onOpen?: () => void }) {
   const pos =
     COMPETITOR_POSITIONS[rival.id] ??
     DISTRICT_POSITIONS[rival.districtId] ?? { left: '50%', top: '50%' };
   const pushing = rival.monthsToExit !== null;
 
   return (
-    <div
+    <button
+      type="button"
       aria-label={`${rival.name} シェア ${percent(rival.share, 0)}%`}
       data-testid={`rival-pin-${rival.id}`}
+      onClick={onOpen}
       style={{
         position: 'absolute',
         left: pos.left,
@@ -548,7 +697,12 @@ function CompetitorPin({ rival }: { rival: CompetitorView }) {
         flexDirection: 'column',
         alignItems: 'center',
         gap: 2,
-        pointerEvents: 'none',
+        // ★押せる。競合は「読める情報」であって背景ではない
+        padding: 0,
+        border: 'none',
+        background: 'none',
+        cursor: 'pointer',
+        WebkitTapHighlightColor: 'transparent',
       }}
     >
       <div
@@ -581,7 +735,7 @@ function CompetitorPin({ rival }: { rival: CompetitorView }) {
           opacity: 0.7,
         }}
       />
-    </div>
+    </button>
   );
 }
 
@@ -711,7 +865,20 @@ function ClinicRow({ clinic, onOpen }: { clinic: ClinicSummary; onOpen: () => vo
       }}
     >
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 'var(--text-body)' }}>{clinic.name}</div>
+        <div style={{ fontSize: 'var(--text-body)' }}>
+          {clinic.name}
+          {/* ★常勤医0は評判より先に目に入るべき。看板だけの院には患者が来ない */}
+          <span
+            className="num"
+            style={{
+              marginLeft: 6,
+              fontSize: 'var(--text-caption)',
+              color: clinic.doctors === 0 ? 'var(--critical)' : 'var(--paper-mute)',
+            }}
+          >
+            医師{clinic.doctors}名
+          </span>
+        </div>
         <div style={{ marginTop: 3 }}>
           <StarRating value={reputationStars(clinic.reputation)} size={12} />
         </div>

@@ -10,6 +10,8 @@ export * from './simulation';
 export * from './accounting';
 export * from './expansion';
 export * from './market';
+export * from './opening';
+export * from './awareness';
 export * from './goals';
 export * from './save';
 export * from './randomEvents';

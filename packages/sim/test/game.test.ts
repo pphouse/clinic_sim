@@ -16,9 +16,11 @@ import {
   CLINIC_SITES,
   EXECUTIVE_SALARY_MAX,
   GOALS,
+  INITIAL_CASH,
   PLAY_SCENARIO,
   SAVE_VERSION,
   createSave,
+  doctorProcurement,
   endingTitleOf,
   parseSave,
   runSimulation,
@@ -28,9 +30,22 @@ import {
   type MonthDecision,
   type MonthResult,
 } from '../src/index';
+import { withOpeningA } from './helpers';
 
 const at = (run: { months: MonthResult[] }, month: number) => run.months[month - 1]!;
-const play = (decisions: MonthDecision[]) => runSimulation({ ...PLAY_SCENARIO, decisions });
+const play = (decisions: MonthDecision[]) =>
+  runSimulation({ ...PLAY_SCENARIO, decisions: withOpeningA(decisions) });
+/**
+ * 銀行の試験用。**開業直後は純資産がほぼゼロで、借入の上限に張り付いてしまう。**
+ * ここで見たいのは開業の資金繰りではなく「純資産の倍率で頭打ちになる」規則なので、
+ * 検証モデルと同じ手元資金から始めて、純資産を確保しておく。
+ */
+const rich = (decisions: MonthDecision[]) =>
+  runSimulation({
+    ...PLAY_SCENARIO,
+    initialCash: INITIAL_CASH,
+    decisions: withOpeningA(decisions),
+  });
 const randomEventsIn = (run: { months: MonthResult[] }) =>
   run.months.flatMap((m) => m.events.filter((e) => e.id.startsWith('random-')));
 
@@ -88,10 +103,12 @@ describe('分院を開く', () => {
       { month: 25, openClinic: 'B', doctorsByClinic: { B: 2 } },
     ]);
     const site = CLINIC_SITES.find((s) => s.id === 'D')!;
-    expect(at(inherited, 25).clinics.find((c) => c.id === 'D')!.patientStock).toBeGreaterThan(
-      site.initialPatientStock * 0.9,
-    );
-    expect(at(fresh, 25).clinics.find((c) => c.id === 'B')!.patientStock).toBeLessThan(100);
+    const d = at(inherited, 25).clinics.find((c) => c.id === 'D')!.patientStock;
+    const b = at(fresh, 25).clinics.find((c) => c.id === 'B')!.patientStock;
+    expect(d).toBeGreaterThan(site.initialPatientStock * 0.9);
+    // 新規もゼロではない（開院直後の立ち上がりで初月から数百人来る）が、
+    // 承継の患者は桁が違う。**引き継ぎの価値がここに出る**
+    expect(b).toBeLessThan(d / 4);
   });
 
   it('承継は高い。開院月の投資額が候補地ごとに違う', () => {
@@ -185,6 +202,32 @@ describe('医師の調達', () => {
     expect(baseline.months.every((m) => !m.staff.doctorShortfall)).toBe(true);
     expect(baseline.months.every((m) => m.staff.doctorsUnfilled === 0)).toBe(true);
   });
+
+  /**
+   * ★プレイテストで「E院を建てたが常勤医の増やし方が分からない」と詰まった。
+   * 枠が無いことは staff に出ていたが、**それを画面が読めていなかった**。
+   * マップと診療所の両方が同じ数字を読めるよう derive に出す。
+   */
+  it('枠が空いていないことと、医師の居ない院が derive から読める', () => {
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 13, openClinic: 'B', doctorsByClinic: { B: 2 } },
+    ]);
+    const p = doctorProcurement(at(run, 14));
+    expect(p.free).toBe(0);
+    expect(p.unfilled).toBe(2);
+    expect(p.emptyClinics).toEqual(['B']);
+  });
+
+  it('枠を買えば空き枠が立ち、警告の条件が消える', () => {
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 3 } },
+      { month: 13, openClinic: 'B', agencyHires: 2, doctorsByClinic: { B: 2 } },
+    ]);
+    const p = doctorProcurement(at(run, 14));
+    expect(p.unfilled).toBe(0);
+    expect(p.emptyClinics).toEqual([]);
+  });
 });
 
 // ==================================================================
@@ -193,9 +236,9 @@ describe('医師の調達', () => {
 
 describe('銀行', () => {
   it('引いた月に現金が増え、借入残高が増える', () => {
-    const without = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
-    const withLoan = play([
-      { month: 1, doctorsByClinic: { A: 3 } },
+    const without = rich([{ month: 1, doctorsByClinic: { A: 2 } }]);
+    const withLoan = rich([
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 5000 },
     ]);
     expect(at(withLoan, 25).financials.cashFlow.newBorrowing).toBe(5000);
@@ -205,8 +248,8 @@ describe('銀行', () => {
   });
 
   it('★純資産の倍率で頭打ちになる。青天井には借りられない', () => {
-    const run = play([
-      { month: 1, doctorsByClinic: { A: 3 } },
+    const run = rich([
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 9_999_999 },
     ]);
     const before = at(run, 24).financials.balanceSheet;
@@ -216,9 +259,9 @@ describe('銀行', () => {
   });
 
   it('利息が乗る。借りたぶんだけ毎月の経常が重くなる', () => {
-    const without = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
-    const withLoan = play([
-      { month: 1, doctorsByClinic: { A: 3 } },
+    const without = rich([{ month: 1, doctorsByClinic: { A: 2 } }]);
+    const withLoan = rich([
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 5000 },
     ]);
     expect(at(withLoan, 30).financials.incomeStatement.interestExpense).toBeGreaterThan(
@@ -227,8 +270,8 @@ describe('銀行', () => {
   });
 
   it('借入残高の合計が取れる', () => {
-    const run = play([
-      { month: 1, doctorsByClinic: { A: 3 } },
+    const run = rich([
+      { month: 1, doctorsByClinic: { A: 2 } },
       { month: 25, borrow: 3000 },
     ]);
     expect(totalOutstanding(run.finalState.loans)).toBeGreaterThan(0);
@@ -266,7 +309,7 @@ describe('突発事象', () => {
   it('通知として画面に振り分けられる', () => {
     const events = randomEventsIn(play(decisions));
     for (const e of events) {
-      expect(['personnel', 'map', 'bureau']).toContain(e.screen);
+      expect(['personnel', 'map', 'bureau', 'clinic', 'medicalAssociation']).toContain(e.screen);
       expect(e.title.length).toBeGreaterThan(0);
       expect(e.body.length).toBeGreaterThan(0);
     }
@@ -282,15 +325,16 @@ describe('ゴール', () => {
     expect(GOALS.map((g) => g.id).sort()).toEqual(['corporate', 'personalWealth', 'scale']);
   });
 
-  it('★何もしなければどれも届かない', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+  it('★1院を開いて放っておくだけでは、どれも届かない', () => {
+    // 常勤医2名は1院で黒字になる唯一の配置。それでも10年で1本も届かない
+    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
     const last = at(run, 120);
     expect(last.goals.goals.every((g) => !g.achieved)).toBe(true);
     expect(last.goals.end.reason).toBe('timeUp');
   });
 
   it('内部留保は資本金を含めない。含めると「何もしない」が6割に見える', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
     const last = at(run, 120);
     const corporate = last.goals.goals.find((g) => g.id === 'corporate')!;
     expect(corporate.value).toBeCloseTo(last.financials.balanceSheet.retainedEarnings, 6);
@@ -327,27 +371,72 @@ describe('ゴール', () => {
 
 describe('終局', () => {
   it('債務超過は1ヶ月では終わらない。谷で殺すと大型投資が全部悪手になる', () => {
+    // 据置が明けたあとに学校2.5億＋役員報酬の満額。**赤字を垂れ流し続ける**
     const run = play([
       { month: 1, doctorsByClinic: { A: 3 } },
-      // 現金を食い潰す。学校2.5億＋分院＋役員報酬の満額。
-      // ★医師を積んで潰すことはもうできない（調達可能数でクランプされる）
-      { month: 13, openSchool: true, openClinic: 'B', executiveSalary: EXECUTIVE_SALARY_MAX },
-      { month: 25, openClinic: 'E', buyProperty: ['A'] },
+      { month: 49, openSchool: true, executiveSalary: EXECUTIVE_SALARY_MAX },
     ]);
-    const firstInsolvent = run.months.find((m) => m.financials.balanceSheet.totalEquity < 0);
+    const failing = run.months.find(
+      (m) =>
+        m.month > 37 &&
+        m.financials.balanceSheet.totalEquity < 0 &&
+        m.financials.incomeStatement.ordinaryIncome < 0,
+    );
     const end = run.months.find((m) => m.goals.end.ended);
-    expect(firstInsolvent).toBeDefined();
+    expect(failing).toBeDefined();
     expect(end?.goals.end.reason).toBe('bankrupt');
-    expect(end!.month - firstInsolvent!.month).toBe(BANKRUPTCY_GRACE_MONTHS - 1);
+    expect(end!.month - failing!.month).toBe(BANKRUPTCY_GRACE_MONTHS - 1);
+  });
+
+  /**
+   * ★純資産がマイナスでも黒字で回っている法人は、潰れているのではなく返している最中。
+   * 開業融資を借りた診療所は純資産が戻るまでに5年かかるが、経常は3年目には黒字になる。
+   * 債務超過だけで殺すと、正しく立ち上げた人が正しさの途中で死ぬ。
+   */
+  it('債務超過でも黒字なら潰れない。返している最中と潰れているのは違う', () => {
+    // ★突発事象を切る。見たいのは判定の規則であって、運の良し悪しではない
+    const run = runSimulation({
+      ...PLAY_SCENARIO,
+      features: {},
+      decisions: withOpeningA([{ month: 1, doctorsByClinic: { A: 2 } }]),
+    });
+    // ★月を固定しない。突発事象で前後するので、**そういう月が実際にあること**を見る
+    const insolventButProfitable = run.months.filter(
+      (m) =>
+        m.financials.balanceSheet.totalEquity < 0 &&
+        m.financials.incomeStatement.ordinaryIncome > 0,
+    );
+    expect(insolventButProfitable.length).toBeGreaterThan(12);
+    expect(at(run, 120).goals.end.reason).toBe('timeUp');
+  });
+
+  /**
+   * ★開業据置。新規開業は1〜3年赤字で回るのが普通で、開業融資もそれを前提に組まれている。
+   * 据置が無いと、**どんな開き方をしても13ヶ月目に全員死ぬ。**
+   */
+  it('開業から3年は債務超過を数え始めない', () => {
+    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
+    // 開院直後から債務超過に入っている
+    expect(at(run, 6).financials.balanceSheet.totalEquity).toBeLessThan(0);
+    // それでも据置の内側では1ヶ月も数えていない
+    expect(at(run, 36).goals.end.insolventMonths).toBe(0);
+    expect(at(run, 36).goals.end.ended).toBe(false);
   });
 
   it('債務超過から戻れば猶予は 0 に戻る', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    // 2院まで広げて黒字化した筋。120ヶ月目には数えが止まっている
+    const run = play([
+      { month: 1, doctorsByClinic: { A: 2 } },
+      {
+        month: 25, openClinic: 'B', openSpecialty: 'hifuka',
+        doctorsByClinic: { B: 2 }, agencyHires: 2, marketingByClinic: { B: 'web' },
+      },
+    ]);
     expect(at(run, 120).goals.end.insolventMonths).toBe(0);
   });
 
   it('120ヶ月まで生き残れば timeUp で終わる', () => {
-    const run = play([{ month: 1, doctorsByClinic: { A: 3 } }]);
+    const run = play([{ month: 1, doctorsByClinic: { A: 2 } }]);
     expect(at(run, 120).goals.end.ended).toBe(true);
     expect(at(run, 120).goals.end.reason).toBe('timeUp');
     expect(at(run, 119).goals.end.ended).toBe(false);

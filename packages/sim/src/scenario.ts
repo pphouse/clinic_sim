@@ -8,14 +8,16 @@
  * そのまま意思決定として書き下したもの。ゴールデンテストの入力になる。
  * **この列を変えるとゴールデンテストが落ちる。**
  */
-import { CLINICS, INITIAL_COMPETITORS, districtPotential } from './constants';
+import { CLINICS, INITIAL_COMPETITORS, OPENING_OWN_FUNDS } from './constants';
 import type {
   ClinicConfig,
   ClinicId,
   CompetitorSpec,
   EmrTier,
   ExternalRelationId,
+  FitoutId,
   Man,
+  MarketingLevelId,
   Month,
   SpecialtyId,
 } from './types';
@@ -79,6 +81,24 @@ export interface MonthDecision {
    * （docs/spec/05-specialty.md）。
    */
   openSpecialty?: SpecialtyId;
+  /**
+   * その分院の内装グレード。省略すると標準。
+   * **科と同じで、開院後に変えられない。** 費用と、その院の評判の落ち着き先が変わる
+   * （docs/spec/06-opening.md §4）。
+   */
+  openFitout?: FitoutId;
+  /**
+   * 院ごとの集患投資（docs/spec/07-awareness.md §3）。
+   * 書いた院だけが変わり、書かなかった院は据え置き。**省略時は「なし」。**
+   * 既定シナリオは1つも書いていないので、追加しても検証済みの結果は動かない。
+   */
+  marketingByClinic?: Partial<Record<ClinicId, MarketingLevelId>>;
+  /**
+   * イベントへの答え（docs/spec/08-decisions.md §2）。イベントの鍵 → 選択肢の id。
+   * **答えなければ既定の選択肢が適用される**ので、放置しても盤面は進む。
+   * 既定シナリオは1つも持たない。
+   */
+  eventChoices?: Record<string, string>;
   /** 銀行から引く額（万円）。純資産の BANK_LEVERAGE_LIMIT 倍を超えると断られる */
   borrow?: Man;
   /**
@@ -97,6 +117,8 @@ export interface MonthDecision {
  */
 export interface ScenarioFeatures {
   randomEvents?: boolean;
+  /** 節目の通知（docs/spec/08-decisions.md §4）。**数字は何も動かさない** */
+  milestones?: boolean;
 }
 
 export interface Scenario {
@@ -116,10 +138,24 @@ export interface Scenario {
    */
   clinics?: ClinicConfig[];
   /**
+   * 開業時の自己資金。**省略すると検証済みの INITIAL_CASH（15,000万）。**
+   * 本編は 1,000万 で始まる（docs/spec/06-opening.md §5）。
+   * 既定シナリオが省略しているので、検証済みの資金繰りは動かない。
+   */
+  initialCash?: Man;
+  /**
    * 最初から地域に居る競合。**省略すると1軒も居ない。**
    * 既定シナリオが省略しているので、シェアは常に 1 で検証済みの式のまま。
    */
   competitors?: CompetitorSpec[];
+  /**
+   * 本部費を開院済みの院数で按分するか（上限は満額）。
+   * ★**省略すると按分しない＝検証済みの固定値のまま。**
+   *
+   * 本編だけ true。1院で始まる形にしたとき、3院ぶんの本部費 83万/月 が
+   * そのまま乗って、**どんな開き方をしても1院では黒字にならなかった**。
+   */
+  scaledHeadquarters?: boolean;
   features?: ScenarioFeatures;
 }
 
@@ -173,12 +209,17 @@ export function decisionAt(scenario: Scenario, month: Month): MonthDecision | un
 /**
  * プレイ用のシナリオ。
  *
- * 検証モデルと違うのは3点だけ：
- *   1. 最初は A 院だけ。**分院はプレイヤーが開く**
- *   2. 突発事象が入る
- *   3. 意思決定は空。全部プレイヤーが決める
+ * 検証モデルと違うのは4点だけ：
+ *   1. **院を1つも持たずに始まる。** 1ヶ月目にやることは開業しかない
+ *   2. 自己資金は 1,000万。設備投資は借りるしかない（docs/spec/06-opening.md）
+ *   3. 突発事象が入る
+ *   4. 意思決定は空。全部プレイヤーが決める
  *
  * 数式は既定シナリオと同じものを通る。**別のゲームにはしていない。**
+ *
+ * ★以前は A院を 3,200人 の患者ごと持って始まっていた。
+ * プレイテストで「最初から患者が来ているのがおかしい」「金がありすぎて痛くない」
+ * と出た。**開業はこのゲームで最初に効く遅延**なので、省略してはいけなかった。
  */
 export const PLAY_SCENARIO: Scenario = {
   id: 'play',
@@ -186,11 +227,13 @@ export const PLAY_SCENARIO: Scenario = {
   seed: 20240401,
   totalMonths: 120,
   initialIgyokuRelation: 60,
-  initialNurses: 7.5,
-  // ★本院のポテンシャルは商圏の独占値。検証モデルの 150 は競合込みの実績値なので、
-  // 競合を盤上に出す本編では、畳み込まれていた分をほどいた数を使う（constants.ts）
-  clinics: [{ ...CLINICS[0]!, newPatientPotential: districtPotential('honmachi') }],
+  // ★常勤医1名ぶん。7.5名は3院ぶんの数で、開業初日から払える給料ではない
+  initialNurses: 2.5,
+  initialCash: OPENING_OWN_FUNDS,
+  scaledHeadquarters: true,
+  // 院は無い。立地も科も内装も、全部プレイヤーが選ぶ
+  clinics: [],
   competitors: INITIAL_COMPETITORS,
-  features: { randomEvents: true },
-  decisions: [{ month: 1, doctorsByClinic: { A: 3 } }],
+  features: { randomEvents: true, milestones: true },
+  decisions: [],
 };
